@@ -126,6 +126,7 @@ const TMP_BOX = new THREE.Box3();
 const TMP_SIZE = new THREE.Vector3();
 const TMP_QUAT_A = new THREE.Quaternion();
 const TMP_QUAT_B = new THREE.Quaternion();
+const TMP_COLOR = new THREE.Color();
 
 function tryBeginExperience() {
   if (started || !assetsLoaded || !userRequestedStart) return;
@@ -142,14 +143,34 @@ function smoothHz(hz, dt) {
 // Controles teclado (WASD + Space)
 const keys = { w: false, a: false, s: false, d: false, space: false, c: false };
 
-// --- Minimap (ortogr�fico �hacia arriba� desde el rover) ---
+// --- Minimap (ortogr?fico ?hacia arriba? desde el rover) ---
 let minimapCam;
+let minimapOverlayScene = null;
+let minimapOverlayCamera = null;
+let minimapCrosshair = null;
+
+let minimapHUD = null;
+let minimapHUDHeader = null;
+let minimapHUDPlanet = null;
+let minimapHUDAlt = null;
+let minimapHUDVel = null;
+let minimapHUDStatus = null;
+const minimapHUDLayoutCache = { ratio: -1, w: -1, h: -1, pad: -1, border: -1 };
 
 const MINIMAP = {
-  w: 200, // ancho px
-  h: 200, // alto px
-  pad: 16, // margen desde el borde
-  worldHalf: 400 // �radio� del �rea vista en el minimapa (en unidades del mundo)
+  w: 260, // ancho px del ?rea ?til del minimapa
+  h: 260, // alto px del ?rea ?til del minimapa
+  pad: 28, // margen desde el borde del render
+  border: 16, // grosor del marco exterior
+  worldHalf: 420, // ?radio? del ?rea vista en el minimapa (en unidades del mundo)
+  frameColor: 0x091320,
+  frameAlpha: 0.94,
+  innerColor: 0x03070d,
+  innerAlpha: 0.88,
+  crosshairColor: 0x66d2ff,
+  crosshairOpacity: 0.68,
+  label: 'ROVER CAM',
+  statusPrefix: 'LINK'
 };
 
 // --- C�mara de persecuci�n suavizada (sin OrbitControls) ---
@@ -163,12 +184,14 @@ const camState = {
 // --- c�mara de persecuci�n un poco m�s lejos (opcional pero recomendado) ---
 const FOLLOW = {
   back: 250,
-  up: 100,
-  postLookLift: -40, // offset vertical adicional para la vista
+  up: 40,
+  postLookLift: 0,
+  postLookNudge: 80,   // nuevo: empuje extra tras el lookAt
   lerpPosHz: 1000,
   lerpRotHz: 1000,
   lerpTargetHz: 1000
 };
+
 
 // Offsets de usuario para la c�mara (yaw/pitch) y orbit �manual�
 let camUserYaw = 0; // rad (izq/der alrededor de up local)
@@ -183,9 +206,14 @@ const ORBIT = {
 };
 
 function renderMinimapUp() {
-  if (!(roverBody && currentPlanet)) return;
+  updateMinimapHUDLayout();
 
-  // Posici�n del rover y normal local (hacia �arriba�)
+  if (!(roverBody && currentPlanet)) {
+    updateMinimapHUDTelemetry(null, null, null);
+    return;
+  }
+
+  // Posicion del rover y normal local (hacia arriba)
   const roverPos = new THREE.Vector3(roverBody.position.x, roverBody.position.y, roverBody.position.z);
   const planetCenter = new THREE.Vector3(
     currentPlanet.body.position.x, currentPlanet.body.position.y, currentPlanet.body.position.z
@@ -197,20 +225,16 @@ function renderMinimapUp() {
   if (fwd.lengthSq() < 1e-8) fwd = new THREE.Vector3(1, 0, 0).cross(up).normalize();
   else fwd.normalize();
 
-  // Coloca la c�mara �debajo� del rover mirando hacia ARRIBA:
-  // posici�n = un pel�n hacia el planeta, mirando hacia �up�
-  const camPos = roverPos.clone().addScaledVector(up, -5); // 5 unidades hacia abajo
-  const camLook = roverPos.clone().addScaledVector(up, 1000); // mira hacia arriba
+  // Coloca la camara "debajo" del rover mirando hacia arriba
+  const camPos = roverPos.clone().addScaledVector(up, -5);
+  const camLook = roverPos.clone().addScaledVector(up, 1000);
 
   minimapCam.position.copy(camPos);
   minimapCam.lookAt(camLook);
-
-  // Queremos que la parte superior del minimapa apunte al heading del rover
-  // -> �up de la c�mara� = heading tangente
   minimapCam.up.copy(fwd);
   minimapCam.updateMatrixWorld();
 
-  // Frustum ortogr�fico: cuadrado centrado en el rayo de la c�mara
+  // Frustum ortografico
   const half = MINIMAP.worldHalf;
   minimapCam.left = -half;
   minimapCam.right = half;
@@ -220,21 +244,64 @@ function renderMinimapUp() {
   minimapCam.far = 1e6;
   minimapCam.updateProjectionMatrix();
 
-  // Viewport y scissor (esquina inferior derecha)
+  const frameColor = MINIMAP.frameColor ?? 0x000000;
+  const frameAlpha = MINIMAP.frameAlpha ?? 1;
+  const innerColor = MINIMAP.innerColor ?? 0x000000;
+  const innerAlpha = MINIMAP.innerAlpha ?? 1;
+  const border = MINIMAP.border ?? 0;
+  const pad = MINIMAP.pad ?? 0;
+  const w = MINIMAP.w ?? 200;
+  const h = MINIMAP.h ?? 200;
+
+  const outerW = w + border * 2;
+  const outerH = h + border * 2;
   const W = renderer.domElement.width;
   const H = renderer.domElement.height;
-  const w = MINIMAP.w, h = MINIMAP.h, p = MINIMAP.pad;
-  const vx = W - w - p;
-  const vy = p;
+  const vxOuter = W - outerW - pad;
+  const vyOuter = pad;
+
+  const prevColor = renderer.getClearColor(TMP_COLOR);
+  const prevColorHex = prevColor.getHex();
+  const prevAlpha = renderer.getClearAlpha();
 
   renderer.setScissorTest(true);
-  renderer.clearDepth(); // limpia Z para esta pasada
-  renderer.setViewport(vx, vy, w, h);
-  renderer.setScissor(vx, vy, w, h);
+
+  renderer.setViewport(vxOuter, vyOuter, outerW, outerH);
+  renderer.setScissor(vxOuter, vyOuter, outerW, outerH);
+  renderer.setClearColor(frameColor, frameAlpha);
+  renderer.clear(true, true, false);
+
+  const innerX = vxOuter + border;
+  const innerY = vyOuter + border;
+  renderer.setViewport(innerX, innerY, w, h);
+  renderer.setScissor(innerX, innerY, w, h);
+  renderer.setClearColor(innerColor, innerAlpha);
+  renderer.clear(true, true, false);
 
   renderer.render(scene, minimapCam);
 
+  if (minimapOverlayScene && minimapOverlayCamera && minimapCrosshair && MINIMAP.crosshairOpacity > 0) {
+    const mat = minimapCrosshair.material;
+    if (mat) {
+      if (mat.color && mat.color.getHex() !== MINIMAP.crosshairColor) {
+        mat.color.setHex(MINIMAP.crosshairColor);
+      }
+      if (mat.opacity !== MINIMAP.crosshairOpacity) {
+        mat.opacity = MINIMAP.crosshairOpacity;
+      }
+    }
+    renderer.clearDepth();
+    renderer.render(minimapOverlayScene, minimapOverlayCamera);
+  }
+
   renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, W, H);
+  renderer.setClearColor(prevColorHex, prevAlpha);
+
+  const altitude = altitudeToPlanet(roverBody, currentPlanet);
+  const vel = roverBody.velocity;
+  const speed = vel ? Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z) : NaN;
+  updateMinimapHUDTelemetry(currentPlanet, altitude, speed);
 }
 
 function initThrusterAudio() {
@@ -297,6 +364,7 @@ function init() {
     }
   });
   initCollectibleUI();
+  initMinimapHUD();
 
   scene = new THREE.Scene();
 
@@ -314,6 +382,41 @@ function init() {
   minimapCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1e7);
   // Orientaci�n de �arriba� de la c�mara; luego la reorientamos cada frame
   minimapCam.up.set(0, 1, 0);
+
+  minimapOverlayScene = new THREE.Scene();
+  minimapOverlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  minimapOverlayCamera.position.set(0, 0, 0.5);
+  minimapOverlayCamera.lookAt(new THREE.Vector3(0, 0, 0));
+  minimapOverlayCamera.updateProjectionMatrix();
+
+  const crossSize = 0.9;
+  const cornerInset = 0.16;
+  const centerSize = 0.12;
+  const crosshairPositions = new Float32Array([
+    -crossSize,  crossSize, 0,  -(crossSize - cornerInset),  crossSize, 0,
+    -crossSize,  crossSize, 0,  -crossSize,  crossSize - cornerInset, 0,
+     crossSize,  crossSize, 0,   crossSize - cornerInset,   crossSize, 0,
+     crossSize,  crossSize, 0,   crossSize,  crossSize - cornerInset, 0,
+    -crossSize, -crossSize, 0,  -(crossSize - cornerInset), -crossSize, 0,
+    -crossSize, -crossSize, 0,  -crossSize, -(crossSize - cornerInset), 0,
+     crossSize, -crossSize, 0,   crossSize - cornerInset,  -crossSize, 0,
+     crossSize, -crossSize, 0,   crossSize, -(crossSize - cornerInset), 0,
+    -centerSize, 0, 0, centerSize, 0, 0,
+    0, -centerSize, 0, 0, centerSize, 0
+  ]);
+  const crosshairGeometry = new THREE.BufferGeometry();
+  crosshairGeometry.setAttribute('position', new THREE.BufferAttribute(crosshairPositions, 3));
+  const crosshairMaterial = new THREE.LineBasicMaterial({
+    color: MINIMAP.crosshairColor,
+    transparent: true,
+    opacity: MINIMAP.crosshairOpacity,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false
+  });
+  minimapCrosshair = new THREE.LineSegments(crosshairGeometry, crosshairMaterial);
+  minimapCrosshair.frustumCulled = false;
+  minimapOverlayScene.add(minimapCrosshair);
 
   initPhysics();
   initKeyboard();
@@ -351,6 +454,178 @@ function initCollectibleUI() {
   collectibleUI.textContent = 'Lunas restantes: --';
   container.appendChild(collectibleUI);
   updateCollectibleCounter();
+}
+
+function initMinimapHUD() {
+  if (minimapHUD) {
+    updateMinimapHUDLayout();
+    return;
+  }
+
+  const container = document.getElementById('container');
+  if (!container) return;
+
+  minimapHUD = document.createElement('div');
+  minimapHUD.id = 'minimap-hud';
+  Object.assign(minimapHUD.style, {
+    position: 'fixed',
+    pointerEvents: 'none',
+    zIndex: '6',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+    color: '#c8e8ff',
+    fontFamily: '"Segoe UI", system-ui, sans-serif',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    fontSize: '11px',
+    background: 'linear-gradient(180deg, rgba(8, 15, 25, 0.55) 0%, rgba(5, 8, 14, 0.22) 100%)',
+    border: '1px solid rgba(102, 210, 255, 0.45)',
+    borderRadius: '16px',
+    boxShadow: '0 18px 36px rgba(0,0,0,0.45)',
+    backdropFilter: 'blur(6px)',
+    opacity: '0',
+    transition: 'opacity 0.3s ease'
+  });
+
+  minimapHUDHeader = document.createElement('div');
+  Object.assign(minimapHUDHeader.style, {
+    padding: '6px 12px',
+    fontSize: '11px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    background: 'linear-gradient(90deg, rgba(38, 104, 168, 0.66) 0%, rgba(76, 196, 255, 0.35) 100%)',
+    borderBottom: '1px solid rgba(86, 178, 255, 0.35)',
+    color: '#e4f5ff'
+  });
+
+  const title = document.createElement('span');
+  title.textContent = MINIMAP.label || 'ROVER CAM';
+  title.style.fontWeight = '600';
+
+  minimapHUDStatus = document.createElement('span');
+  minimapHUDStatus.textContent = (MINIMAP.statusPrefix || 'LINK') + ' :: OFFLINE';
+  minimapHUDStatus.style.fontWeight = '600';
+  minimapHUDStatus.style.fontSize = '10px';
+  minimapHUDStatus.style.color = '#ff8c8c';
+
+  minimapHUDHeader.appendChild(title);
+  minimapHUDHeader.appendChild(minimapHUDStatus);
+  minimapHUD.appendChild(minimapHUDHeader);
+
+  minimapHUDPlanet = document.createElement('div');
+  Object.assign(minimapHUDPlanet.style, {
+    padding: '6px 12px 4px',
+    fontSize: '10px',
+    color: '#98cfff'
+  });
+  minimapHUDPlanet.textContent = 'PLANETA :: ---';
+  minimapHUD.appendChild(minimapHUDPlanet);
+
+  const telemetryRow = document.createElement('div');
+  Object.assign(telemetryRow.style, {
+    padding: '0 12px 10px',
+    fontSize: '10px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: '12px',
+    color: '#a6dbff'
+  });
+
+  minimapHUDAlt = document.createElement('span');
+  minimapHUDAlt.textContent = 'ALT ---';
+  minimapHUDVel = document.createElement('span');
+  minimapHUDVel.textContent = 'VEL ---';
+  telemetryRow.appendChild(minimapHUDAlt);
+  telemetryRow.appendChild(minimapHUDVel);
+  minimapHUD.appendChild(telemetryRow);
+
+  container.appendChild(minimapHUD);
+  updateMinimapHUDLayout();
+}
+
+function updateMinimapHUDLayout() {
+  if (!minimapHUD || !renderer) return;
+
+  const ratio = typeof renderer.getPixelRatio === 'function'
+    ? renderer.getPixelRatio()
+    : (window.devicePixelRatio || 1);
+
+  const border = MINIMAP.border ?? 0;
+  const pad = MINIMAP.pad ?? 0;
+  const w = MINIMAP.w ?? 200;
+  const h = MINIMAP.h ?? 200;
+  const outerW = w + border * 2;
+  const outerH = h + border * 2;
+
+  if (
+    minimapHUDLayoutCache.ratio === ratio &&
+    minimapHUDLayoutCache.w === outerW &&
+    minimapHUDLayoutCache.h === outerH &&
+    minimapHUDLayoutCache.pad === pad &&
+    minimapHUDLayoutCache.border === border
+  ) {
+    return;
+  }
+
+  minimapHUDLayoutCache.ratio = ratio;
+  minimapHUDLayoutCache.w = outerW;
+  minimapHUDLayoutCache.h = outerH;
+  minimapHUDLayoutCache.pad = pad;
+  minimapHUDLayoutCache.border = border;
+
+  const cssW = outerW / ratio;
+  const cssH = outerH / ratio;
+  const cssPad = pad / ratio;
+  const cssRadius = Math.max(12, (border / ratio) * 1.1);
+
+  minimapHUD.style.width = cssW + 'px';
+  minimapHUD.style.height = cssH + 'px';
+  minimapHUD.style.right = cssPad + 'px';
+  minimapHUD.style.bottom = cssPad + 'px';
+  minimapHUD.style.borderRadius = cssRadius + 'px';
+}
+
+function updateMinimapHUDTelemetry(planet, altitude, speed) {
+  if (!minimapHUD) return;
+
+  const prefix = MINIMAP.statusPrefix || 'LINK';
+
+  if (!planet) {
+    minimapHUD.style.opacity = '0';
+    if (minimapHUDStatus) {
+      minimapHUDStatus.textContent = prefix + ' :: OFFLINE';
+      minimapHUDStatus.style.color = '#ff8c8c';
+    }
+    if (minimapHUDPlanet) minimapHUDPlanet.textContent = 'PLANETA :: ---';
+    if (minimapHUDAlt) minimapHUDAlt.textContent = 'ALT ---';
+    if (minimapHUDVel) minimapHUDVel.textContent = 'VEL ---';
+    return;
+  }
+
+  minimapHUD.style.opacity = '1';
+
+  if (minimapHUDStatus) {
+    minimapHUDStatus.textContent = prefix + ' :: ONLINE';
+    minimapHUDStatus.style.color = '#7ceefe';
+  }
+
+  if (minimapHUDPlanet) {
+    const planetName = planet.name ? planet.name.toUpperCase() : '---';
+    minimapHUDPlanet.textContent = 'PLANETA :: ' + planetName;
+  }
+
+  if (minimapHUDAlt) {
+    const altText = Number.isFinite(altitude) ? Math.round(altitude) + ' m' : '---';
+    minimapHUDAlt.textContent = 'ALT ' + altText;
+  }
+
+  if (minimapHUDVel) {
+    const speedText = Number.isFinite(speed) ? speed.toFixed(1) + ' m/s' : '---';
+    minimapHUDVel.textContent = 'VEL ' + speedText;
+  }
 }
 
 function updateCollectibleCounter() {
@@ -674,6 +949,9 @@ function spawnRoverOnSun({ latDeg = 8, lonDeg = 120, heightMeters = 1.6 } = {}) 
 
     const camUp = localUp.clone();
     const extraLift = (FOLLOW?.postLookLift ?? 0);
+
+    
+
     const camPos = new THREE.Vector3(spawn.x, spawn.y, spawn.z)
       .add(roverHeading.clone().negate().multiplyScalar(FOLLOW.back))
       .add(camUp.clone().multiplyScalar(FOLLOW.up + extraLift));
@@ -1655,6 +1933,8 @@ function updateChaseCamera(dt) {
   camera.quaternion.slerp(qDesired, aRot);
 
   camera.position.copy(camState.pos);
+
+  camera.position.addScaledVector(camState.up, FOLLOW.postLookNudge);
 }
 
 
@@ -1666,6 +1946,7 @@ function updateAspectRatio() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  updateMinimapHUDLayout();
 }
 
 function updateThrusterAudio(dt, upVec) {
