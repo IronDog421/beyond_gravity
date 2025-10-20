@@ -65,6 +65,13 @@ function updateSteer(dt, allowSteer = true) {
   roverSteerAngle += (target - roverSteerAngle) * a;
 }
 
+// Sesgo fijo de cámara (en radianes)
+const VIEW_BIAS = {
+  yaw:  THREE.MathUtils.degToRad(-20),  // +izquierda, -derecha
+  pitch: 0,
+  roll:  0
+};
+
 
 
 // Heading tangente persistente (a prueba de polos)
@@ -156,7 +163,7 @@ const camState = {
 // --- c�mara de persecuci�n un poco m�s lejos (opcional pero recomendado) ---
 const FOLLOW = {
   back: 200,
-  up: 100,
+  up: 75,
   lerpPosHz: 1000,
   lerpRotHz: 1000,
   lerpTargetHz: 1000
@@ -1612,9 +1619,9 @@ function updateChaseCamera(dt) {
   // Direcci�n base: "detr�s" del rover
   const behindDir = camState.heading.clone().negate().normalize();
 
-  // Aplica la rotaci�n de yaw alrededor de "up"
-  const offsetDir = behindDir.clone().applyAxisAngle(camState.up, camUserYaw);
-
+    // Aplica la rotaci�n de yaw alrededor de "up"
+  const yaw = VIEW_BIAS.yaw + camUserYaw;               // sesgo + interacción del usuario
+  const offsetDir = behindDir.clone().applyAxisAngle(camState.up, yaw);
   // Eje right para aplicar pitch relativo al offset actual
   const right = camState.up.clone().cross(offsetDir).normalize();
 
