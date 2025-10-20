@@ -162,8 +162,9 @@ const camState = {
 };
 // --- c�mara de persecuci�n un poco m�s lejos (opcional pero recomendado) ---
 const FOLLOW = {
-  back: 200,
-  up: 75,
+  back: 250,
+  up: 100,
+  postLookLift: -40, // offset vertical adicional para la vista
   lerpPosHz: 1000,
   lerpRotHz: 1000,
   lerpTargetHz: 1000
@@ -672,9 +673,10 @@ function spawnRoverOnSun({ latDeg = 8, lonDeg = 120, heightMeters = 1.6 } = {}) 
     roverHeading.copy(any.cross(localUp)).normalize();
 
     const camUp = localUp.clone();
+    const extraLift = (FOLLOW?.postLookLift ?? 0);
     const camPos = new THREE.Vector3(spawn.x, spawn.y, spawn.z)
       .add(roverHeading.clone().negate().multiplyScalar(FOLLOW.back))
-      .add(camUp.clone().multiplyScalar(FOLLOW.up));
+      .add(camUp.clone().multiplyScalar(FOLLOW.up + extraLift));
 
     camState.pos.copy(camPos);
     camState.up.copy(camUp);
@@ -683,7 +685,7 @@ function spawnRoverOnSun({ latDeg = 8, lonDeg = 120, heightMeters = 1.6 } = {}) 
 
     // Colocar c?mara exacta al inicio (sin lerp)
     camera.position.copy(camState.pos);
-    const lookM = new THREE.Matrix4().lookAt(camera.position, camState.target, camUp);
+    const lookM = new THREE.Matrix4().lookAt(camState.pos, camState.target, camUp);
     camera.quaternion.setFromRotationMatrix(lookM);
   }
 
@@ -1629,9 +1631,10 @@ function updateChaseCamera(dt) {
   offsetDir.applyAxisAngle(right, camUserPitch).normalize();
 
   // Posici�n deseada = detr�s + arriba
+  const extraLift = (FOLLOW?.postLookLift ?? 0);
   const desiredPos = roverPos.clone()
     .addScaledVector(offsetDir, back)
-    .addScaledVector(camState.up, height);
+    .addScaledVector(camState.up, height + extraLift);
 
   let targetDesired;
   if (player && player.userData?.camTargetOffset) {
