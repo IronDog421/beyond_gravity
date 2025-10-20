@@ -1,0 +1,162 @@
+<!doctype html>
+<!-- 
+Seminario 2 Grafo de escena
+-->
+<html lang="es">
+	<head>
+		<meta charset='utf-8'>
+		<title>Seminario 2: Ejercicio 1</title>
+    <style>
+      html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        color-scheme: dark;
+        font-family: 'Segoe UI', Arial, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        background-color: #000;
+        overflow: hidden;
+      }
+
+      #startOverlay {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.92));
+        z-index: 10;
+        transition: opacity 0.6s ease, visibility 0.6s ease;
+      }
+
+      #startOverlay.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      #startOverlay .panel {
+        max-width: 520px;
+        width: calc(100% - 64px);
+        padding: 48px 44px;
+        border-radius: 28px;
+        background: rgba(10, 13, 24, 0.85);
+        border: 1px solid rgba(120, 173, 255, 0.35);
+        box-shadow: 0 32px 64px rgba(0, 0, 0, 0.65), 0 0 42px rgba(94, 182, 255, 0.25);
+        text-align: center;
+        backdrop-filter: blur(16px);
+      }
+
+      #startOverlay h1 {
+        margin: 0 0 18px;
+        font-size: clamp(32px, 5vw, 56px);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #f5f7ff;
+        text-shadow: 0 0 18px rgba(120, 173, 255, 0.75);
+      }
+
+      #startOverlay p {
+        margin: 0 0 32px;
+        font-size: 17px;
+        line-height: 1.6;
+        color: rgba(219, 232, 255, 0.82);
+      }
+
+      #startOverlay button {
+        padding: 14px 52px;
+        font-size: 17px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        border-radius: 999px;
+        border: none;
+        cursor: pointer;
+        background: linear-gradient(135deg, #5ed1ff, #9b6dff);
+        color: #01030c;
+        font-weight: 700;
+        box-shadow: 0 18px 40px rgba(94, 209, 255, 0.45);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      #startOverlay button:hover {
+        transform: translateY(-2px) scale(1.02);
+        box-shadow: 0 22px 46px rgba(155, 109, 255, 0.55);
+      }
+
+      #startOverlay button:active {
+        transform: translateY(1px) scale(0.99);
+      }
+
+      #startOverlay button:disabled,
+      #startOverlay button.loading {
+        opacity: 0.55;
+        cursor: progress;
+        transform: none;
+        box-shadow: none;
+      }
+
+      #startOverlay button:disabled:hover,
+      #startOverlay button.loading:hover {
+        transform: none;
+        box-shadow: none;
+      }
+
+      #container {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+      }
+
+      #container canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+    </style>
+	</head>
+	<body>
+		<!-- Contenedor del app -->
+		<div id="container"></div>
+    <div id="startOverlay">
+      <div class="panel">
+        <h1>Beyond Gravity</h1>
+        <p>
+          Explora el sistema estelar, recolecta Powermoons y domina la gravedad de cada planeta.
+          Cuando estés listo para despegar, pulsa el botón y comienza la aventura.
+        </p>
+        <button id="startButton">Iniciar viaje</button>
+      </div>
+    </div>
+
+		<!-- Scripts de biblioteca -->
+		<script src="lib/three.min_r140.js"></script>
+		<script src="lib/OrbitControls.js"></script>
+		<script src="js/inflate.min.js"></script>
+		<script src="js/FBXLoader.js"></script>
+		<script src="js/ColladaLoader.js"></script>
+		<script src="lib/cannon_062.js"></script>
+		<script src="lib/stats.min.js"></script>
+		<script src="lib/dat.gui.min.js"></script>
+		<script src="js/FBXLoader.js"></script>		
+	
+
+
+		<!-- Mi codigo -->
+		<script type="module" src="p2.js"></script>
+		<script src="js/inflate.min.js"></script>
+
+	</body>
+</html>

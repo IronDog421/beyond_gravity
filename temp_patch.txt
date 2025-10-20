@@ -1,0 +1,10 @@
+*** Begin Patch
+*** Update File: p2.js
+@@
+-    scene.add(player);
++    scene.add(player);
++    setupRoverWheels(player);
+ 
+ 
+*** End Patch
+
