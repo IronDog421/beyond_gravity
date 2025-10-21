@@ -1,7 +1,4 @@
-﻿// === Requiere THREE, FBXLoader y Cannon (CANNON o cannon-es) cargados antes ===
-
-// --- globales ---
-var renderer, scene, camera, cameraControls;
+﻿var renderer, scene, camera, cameraControls;
 let started = false;
 let assetsLoaded = false;
 let userRequestedStart = false;
@@ -14,54 +11,38 @@ let gameOverOverlay = null;
 const GAME_OVER_RESTART_MS = 2600;
 const SUN_DESTRUCTION_MARGIN = 40;
 
-let roverSpawnPoint = null;       // Vector3 del último spawn calculado
-let roverDesiredHeight = 20;      // altura visual del rover (en tus unidades)
-
-// --- Audio (propulsor) ---
+let roverSpawnPoint = null;
+let roverDesiredHeight = 20;
 let audioListener, thruster = null, thrusterLoaded = false;
 let _thrusterVol = 0;
 
-const THRUSTER_SOUND_URL = '/audio/propulsor.mp3'; // <-- pon aqu� tu archivo
-const THRUSTER_MAX_VOL = 0.8; // volumen objetivo cuando acelera
-const THRUSTER_FADE_HZ = 8.0; // rapidez del fade in/out
-const THRUSTER_MIN_RATE = 0.90; // pitch m�nimo
-const THRUSTER_MAX_RATE = 1.30; // pitch m�ximo
-
-// Rover / anims
-let player = null, mixer = null, activeAction = null;
-let actions = {};
+const THRUSTER_SOUND_URL = '/audio/propulsor.mp3';
+const THRUSTER_MAX_VOL = 0.8;
+const THRUSTER_FADE_HZ = 8.0;
+const THRUSTER_MIN_RATE = 0.90;
+const THRUSTER_MAX_RATE = 1.30;
+let player = null, mixer = null;
 const clock = new THREE.Clock();
 let applyRoverTextures = null;
 
-// Ruedas y direcci?n visual
 let roverWheelInfos = [];
 let roverSteerAngle = 0;
-let roverSteerTarget = 0;
 const ROVER_MAX_STEER = THREE.MathUtils.degToRad(45);
 const ROVER_STEER_HZ = 7.5;
 const ROVER_STEER_RETURN_HZ = 10.0;
-const ROVER_LATERAL_DAMP_HZ = 12.0;
-const ROVER_ROLL_DAMP_HZ = 2.8;
-let roverWheelBase = 40;
-let roverTrackWidth = 30;
-const ROVER_MIN_STEER_SPEED = 0.2; // velocidad minima para permitir direccion en suelo
-const ROVER_AIRBORNE_ALT_EPS = 1.0; // altura minima para considerar el rover en el aire a efectos de giro
-const ROVER_GROUND_BRAKE_HZ = 16.0; // rapidez con la que se frena en suelo sin entrada
-const ROVER_VISUAL_OFFSET = -8; // Ajusta este valor (negativo = más abajo, positivo = más arriba)
-
-// F�sicas de control
-let TURN_SPEED = 1.0; // rad/s
-let THRUST = 5000; // empuje tangencial
-let UP_THRUST_MULT = 1500.0; // Space (vertical)
-const DOWN_THRUST_MULT = 1800.0; // C (descenso)
-const TAKEOFF_RAMP_S = 1.2; // seg de rampa (lento ? est�ndar)
-const ASCENT_V_STD = 300; // velocidad vertical �est�ndar� (unid/s)
-const CLIMB_GAIN = 3.0; // qu� tan r�pido corrige hasta v objetivo (1/s)
-
-let climb = { active: false, t: 0 }; // estado del despegue
-
+const ROVER_MIN_STEER_SPEED = 0.2;
+const ROVER_GROUND_BRAKE_HZ = 16.0;
+const ROVER_VISUAL_OFFSET = -8;
+let TURN_SPEED = 1.0;
+let THRUST = 5000;
+let UP_THRUST_MULT = 1500.0;
+const DOWN_THRUST_MULT = 1800.0;
+const TAKEOFF_RAMP_S = 1.2;
+const ASCENT_V_STD = 300;
+const CLIMB_GAIN = 3.0;
+let climb = { active: false, t: 0 };
 function updateSteer(dt, allowSteer = true) {
-  // Objetivo seg?n input
+
   let target = 0;
   if (allowSteer) {
     if (keys.a && !keys.d) target = +ROVER_MAX_STEER;
@@ -69,51 +50,43 @@ function updateSteer(dt, allowSteer = true) {
   }
 
   const hz = (target === 0 ? ROVER_STEER_RETURN_HZ : ROVER_STEER_HZ);
-  const a = 1 - Math.exp(-hz * dt); // suavizado independiente del framerate
+  const a = 1 - Math.exp(-hz * dt);
   roverSteerAngle += (target - roverSteerAngle) * a;
 }
 
-// Sesgo fijo de cámara (en radianes)
 const VIEW_BIAS = {
-  yaw:  THREE.MathUtils.degToRad(-20),  // +izquierda, -derecha
+  yaw:  THREE.MathUtils.degToRad(-20),
   pitch: 0,
   roll:  0
 };
 
-
-
-// Heading tangente persistente (a prueba de polos)
 let roverHeading = new THREE.Vector3(1, 0, 0);
 
-// Sol
 let starMesh;
-const STAR_RADIUS = 1200; // sol ligeramente mayor que los planetas
+const STAR_RADIUS = 1200;
 let sunDirLight = null;
 const SUN_DIR_LIGHT_OFFSET = 9000;
 
-// === F�SICA ===
 let world, roverBody;
 let planetMat, roverMat;
 
-// registro de planetas (visual + f�sico)
 const planets = [];
 let currentPlanet = null;
 let previousPlanet = null;
-let planetTransitionT = 1.0; // 0=antiguo, 1=nuevo (completado)
-const PLANET_TRANSITION_SPEED = 0.2; // velocidad de transici�n
+let planetTransitionT = 1.0;
+const PLANET_TRANSITION_SPEED = 0.2;
 
 function getPlanetByName(name) {
   return planets.find((p) => p && p.name === name) || null;
 }
 
-// Collectibles (modelos DAE)
 const collectibles = [];
 const collectibleSpawns = [];
 let collectibleTemplate = null;
 let collectiblesCollected = 0;
 let collectibleUI = null;
 
-const COLLECTIBLE_TARGET_SIZE = 90; // altura aproximada deseada (unid. juego)
+const COLLECTIBLE_TARGET_SIZE = 90;
 const COLLECTIBLE_DEFAULTS = {
   altitudeFactor: 0.12,
   spinSpeed: THREE.MathUtils.degToRad(45),
@@ -138,7 +111,6 @@ const TMP_VEC_I = new THREE.Vector3();
 const TMP_BOX = new THREE.Box3();
 const TMP_SIZE = new THREE.Vector3();
 const TMP_QUAT_A = new THREE.Quaternion();
-const TMP_QUAT_B = new THREE.Quaternion();
 const TMP_COLOR = new THREE.Color();
 
 function tryBeginExperience() {
@@ -148,15 +120,8 @@ function tryBeginExperience() {
   render();
 }
 
-function smoothHz(hz, dt) {
-  if (hz <= 0) { return 0; }
-  return 1 - Math.exp(-hz * dt);
-}
-
-// Controles teclado (WASD + Space)
 const keys = { w: false, a: false, s: false, d: false, space: false, c: false };
 
-// --- Minimap (ortogr?fico ?hacia arriba? desde el rover) ---
 let minimapCam;
 let minimapOverlayScene = null;
 let minimapOverlayCamera = null;
@@ -171,11 +136,11 @@ let minimapHUDStatus = null;
 const minimapHUDLayoutCache = { ratio: -1, w: -1, h: -1, pad: -1, border: -1 };
 
 const MINIMAP = {
-  w: 260, // ancho px del ?rea ?til del minimapa
-  h: 260, // alto px del ?rea ?til del minimapa
-  pad: 28, // margen desde el borde del render
-  border: 16, // grosor del marco exterior
-  worldHalf: 420, // ?radio? del ?rea vista en el minimapa (en unidades del mundo)
+  w: 260,
+  h: 260,
+  pad: 28,
+  border: 16,
+  worldHalf: 420,
   frameColor: 0x091320,
   frameAlpha: 0.94,
   innerColor: 0x03070d,
@@ -186,7 +151,6 @@ const MINIMAP = {
   statusPrefix: 'LINK'
 };
 
-// --- C�mara de persecuci�n suavizada (sin OrbitControls) ---
 const camState = {
   pos: new THREE.Vector3(),
   target: new THREE.Vector3(),
@@ -194,28 +158,26 @@ const camState = {
   heading: new THREE.Vector3(0, 0, 1),
   q: new THREE.Quaternion()
 };
-// --- c�mara de persecuci�n un poco m�s lejos (opcional pero recomendado) ---
+
 const FOLLOW = {
   back: 250,
   up: 40,
   postLookLift: 0,
-  postLookNudge: 80,   // nuevo: empuje extra tras el lookAt
+  postLookNudge: 80,
   lerpPosHz: 1000,
   lerpRotHz: 1000,
   lerpTargetHz: 1000
 };
 
-
-// Offsets de usuario para la c�mara (yaw/pitch) y orbit �manual�
-let camUserYaw = 0; // rad (izq/der alrededor de up local)
-let camUserPitch = 0; // rad (arriba/abajo alrededor de right local)
-let camDragging = false; // arrastrando el mouse ahora
+let camUserYaw = 0;
+let camUserPitch = 0;
+let camDragging = false;
 
 const ORBIT = {
-  sensitivity: 0.003, // rad por pixel
-  pitchMin: -1.5, // no limitar inclinaci�n hacia abajo
-  pitchMax: 1.5, // no limitar inclinaci�n hacia arriba
-  returnHz: 1.0 // velocidad de retorno suave hacia detr�s del rover
+  sensitivity: 0.003,
+  pitchMin: -1.5,
+  pitchMax: 1.5,
+  returnHz: 1.0
 };
 
 function renderMinimapUp() {
@@ -226,19 +188,19 @@ function renderMinimapUp() {
     return;
   }
 
-  // Posicion del rover y normal local (hacia arriba)
+
   const roverPos = new THREE.Vector3(roverBody.position.x, roverBody.position.y, roverBody.position.z);
   const planetCenter = new THREE.Vector3(
     currentPlanet.body.position.x, currentPlanet.body.position.y, currentPlanet.body.position.z
   );
   const up = roverPos.clone().sub(planetCenter).normalize();
 
-  // Heading proyectado al plano tangente (para orientar el minimapa)
+
   let fwd = roverHeading.clone().addScaledVector(up, -roverHeading.dot(up));
   if (fwd.lengthSq() < 1e-8) fwd = new THREE.Vector3(1, 0, 0).cross(up).normalize();
   else fwd.normalize();
 
-  // Coloca la camara "debajo" del rover mirando hacia arriba
+
   const camPos = roverPos.clone().addScaledVector(up, -5);
   const camLook = roverPos.clone().addScaledVector(up, 1000);
 
@@ -247,7 +209,7 @@ function renderMinimapUp() {
   minimapCam.up.copy(fwd);
   minimapCam.updateMatrixWorld();
 
-  // Frustum ortografico
+
   const half = MINIMAP.worldHalf;
   minimapCam.left = -half;
   minimapCam.right = half;
@@ -321,13 +283,13 @@ function initThrusterAudio() {
   const loader = new THREE.AudioLoader();
   thruster = new THREE.PositionalAudio(audioListener);
 
-  // Config posicional b�sica (ajusta a tu gusto)
+
   thruster.setRefDistance(100);
   thruster.setMaxDistance(2000);
   thruster.setRolloffFactor(0.5);
   try { thruster.setDistanceModel('linear'); } catch { }
 
-  // Bucle y arranca muteado (luego hacemos fade)
+
   thruster.setLoop(true);
   thruster.setVolume(0);
 
@@ -335,14 +297,11 @@ function initThrusterAudio() {
     thruster.setBuffer(buffer);
     thrusterLoaded = true;
     try { thruster.play(); } catch (e) { }
-    // Si el modelo visual ya existe, lo colgamos del rover
+
     if (player) player.add(thruster);
   });
 }
 
-
-
-// 1) init
 function init() {
   renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
@@ -350,7 +309,7 @@ function init() {
   renderer.setClearColor(0x000000);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.autoClear = false; // <- importante: vamos a renderizar dos veces
+  renderer.autoClear = false;
   document.getElementById('container').appendChild(renderer.domElement);
 
   startOverlayEl = document.getElementById('startOverlay');
@@ -391,10 +350,10 @@ function init() {
   cameraControls.enableDamping = true;
   cameraControls.dampingFactor = 0.06;
 
-  // --- c�mara ortogr�fica del minimapa ---
-  // Valores iniciales; los actualizamos cada frame en renderMinimapUp()
+
+
   minimapCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1e7);
-  // Orientaci�n de �arriba� de la c�mara; luego la reorientamos cada frame
+
   minimapCam.up.set(0, 1, 0);
 
   minimapOverlayScene = new THREE.Scene();
@@ -436,7 +395,7 @@ function init() {
   initKeyboard();
   initCamInput();
 
-  // ---- AUDIO ----
+
   audioListener = new THREE.AudioListener();
   camera.add(audioListener);
   initThrusterAudio();
@@ -469,7 +428,6 @@ function initCollectibleUI() {
   container.appendChild(collectibleUI);
   updateCollectibleCounter();
 }
-
 
 function initGameOverOverlay() {
   if (gameOverOverlay) return;
@@ -674,7 +632,6 @@ function updateMinimapHUDTelemetry(planet, altitude, speed) {
   }
 }
 
-
 function triggerGameOver(message = 'ROVER DESTRUIDO') {
   if (gameOver) return;
 
@@ -726,7 +683,6 @@ function updateCollectibleCounter() {
   }
 }
 
-
 function initKeyboard() {
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.w = true;
@@ -740,7 +696,7 @@ function initKeyboard() {
     if (e.code === 'Space') {
       keys.space = true;
 
-      // Solo armamos la rampa si estamos en suelo
+
       if (!climb.active && isGrounded(roverBody, currentPlanet)) {
         climb.active = true;
         climb.t = 0;
@@ -748,13 +704,12 @@ function initKeyboard() {
     }
 
 
-    // NUEVO: descenso
     if (e.code === 'KeyC') {
       keys.c = true;
-      climb.active = false; // si estabas despegando, lo cancela
+      climb.active = false;
     }
 
-    // (antes era KeyC) -> ahora toggle de c�mara en V
+
     if (e.code === 'KeyV') {
       cameraControls.enabled = !cameraControls.enabled;
     }
@@ -766,80 +721,10 @@ function initKeyboard() {
     if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.a = false;
     if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.d = false;
     if (e.code === 'Space') keys.space = false;
-    if (e.code === 'KeyC') keys.c = false; // suelta descenso
+    if (e.code === 'KeyC') keys.c = false;
   });
 }
 
-
-// === DEBUG COLLIDERS (THREE) ===
-const colliderHelpers = [];
-
-function addColliderHelper(body, { color = 0x00ffff, opacity = 0.5, onTop = false } = {}) {
-  const group = new THREE.Group();
-  group.userData.body = body;
-
-  const matOpts = {
-    color,
-    transparent: true,
-    opacity,
-    depthWrite: false,
-    depthTest: !onTop,
-    side: THREE.DoubleSide
-  };
-
-  // body.shapes puede tener varias; respeta offsets y quats de cada shape
-  for (let i = 0; i < body.shapes.length; i++) {
-    const shape = body.shapes[i];
-    const offset = body.shapeOffsets?.[i] || new CANNON.Vec3(0, 0, 0);
-    const orient = body.shapeOrientations?.[i] || new CANNON.Quaternion(0, 0, 0, 1);
-
-    let geom = null;
-
-    if (shape.type === CANNON.Shape.types.BOX) {
-      // half-extents -> dimensiones reales = *2
-      const he = shape.halfExtents;
-      geom = new THREE.BoxGeometry(he.x * 2, he.y * 2, he.z * 2);
-    } else if (shape.type === CANNON.Shape.types.SPHERE) {
-      geom = new THREE.SphereGeometry(shape.radius, 24, 18);
-    } else if (shape.type === CANNON.Shape.types.CYLINDER) {
-      // CANNON Cylinder: radiusTop, radiusBottom, height, numSegments
-      geom = new THREE.CylinderGeometry(shape.radiusTop, shape.radiusBottom, shape.height, 24);
-    } else if (shape.type === CANNON.Shape.types.PARTICLE) {
-      geom = new THREE.SphereGeometry(0.1, 8, 6);
-    } else {
-      // Fallback simple para otros tipos
-      geom = new THREE.SphereGeometry(0.5, 12, 8);
-    }
-
-    const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial(matOpts));
-    // aristas para que se lea mejor
-    const edges = new THREE.EdgesGeometry(geom);
-    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color }));
-    mesh.add(line);
-
-    // aplica offset/orient de la shape dentro del body
-    mesh.position.set(offset.x, offset.y, offset.z);
-    mesh.quaternion.set(orient.x, orient.y, orient.z, orient.w);
-
-    group.add(mesh);
-  }
-
-  scene.add(group);
-  colliderHelpers.push(group);
-  return group;
-}
-
-// Llamar cada frame para sincronizar con Cannon
-function syncColliderHelpers() {
-  for (const g of colliderHelpers) {
-    const b = g.userData.body;
-    g.position.set(b.position.x, b.position.y, b.position.z);
-    g.quaternion.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
-    g.updateMatrixWorld();
-  }
-}
-
-// === SETUP ===
 function setupRoverWheels(root) {
   roverWheelInfos = [];
   if (!root) return;
@@ -855,12 +740,6 @@ function setupRoverWheels(root) {
     { name: 'Cylinder011', sideSign: -1, steer: false, offset: new THREE.Vector3(-7, 1.1, 0.75) },
     { name: 'Cylinder020', sideSign: -1, steer: false, offset: new THREE.Vector3(-7, 1.1, -8.5) }
   ];
-
-  const baseMaterial = new THREE.MeshStandardMaterial({
-    color: 0xB8B8B8,
-    metalness: 0.35,
-    roughness: 0.55
-  });
 
   const geometryCache = new Map();
   const getWheelGeometry = (radius, width) => {
@@ -893,7 +772,7 @@ function setupRoverWheels(root) {
     const localPos = worldPos.clone();
     root.worldToLocal(localPos);
 
-    // Apply custom offset instead of using original position
+
     const finalPos = cfg.offset ? cfg.offset.clone() : localPos;
 
     original.removeFromParent();
@@ -906,7 +785,7 @@ function setupRoverWheels(root) {
     const rollPivot = new THREE.Object3D();
     rollPivot.name = cfg.name + '_roll';
     pivot.add(rollPivot);
-    
+
 
     const wheelMesh = new THREE.Mesh(getWheelGeometry(radius, width), new THREE.MeshStandardMaterial({
       color: 0x000000,
@@ -982,7 +861,7 @@ function updateRoverWheels(dt, up) {
 }
 function initPhysics() {
   world = new CANNON.World();
-  world.gravity.set(0, 0, 0); // gravedad radial manual
+  world.gravity.set(0, 0, 0);
   world.broadphase = new CANNON.NaiveBroadphase();
   world.solver.iterations = 10;
 
@@ -990,14 +869,12 @@ function initPhysics() {
   roverMat = new CANNON.Material('rover');
 
   const contact = new CANNON.ContactMaterial(planetMat, roverMat, {
-    friction: 300, // mayor rozamiento rover-planeta
+    friction: 300,
     restitution: 0.0
   });
   world.addContactMaterial(contact);
 }
 
-
-// === Spawner: coloca el rover sobre un planeta objetivo ===
 function spawnRoverOnPlanet({
   planetName = 'Nivalis',
   latDeg = 8,
@@ -1033,10 +910,10 @@ function spawnRoverOnPlanet({
   const surfacePoint = planetCenter.clone().addScaledVector(localUp, planet.radius);
   const spawn = surfacePoint.clone().addScaledVector(localUp, altitudeOffset);
 
-  roverSpawnPoint  = spawn.clone();     // recuerda dónde hay que poner el mesh
-  roverDesiredHeight = heightMeters;    // recuerda a qué altura quieres escalarlo
+  roverSpawnPoint  = spawn.clone();
+  roverDesiredHeight = heightMeters;
 
-  // Si el mesh ya está cargado, posiciona/escala ahora:
+
   if (player) finalizeRoverMeshPlacement();
 
   if (roverBody) {
@@ -1046,7 +923,7 @@ function spawnRoverOnPlanet({
   roverBody = new CANNON.Body({
     mass: 100,
     material: roverMat,
-    shape: new CANNON.Box(new CANNON.Vec3(13, 8, 16)), // 4x2x8 m
+    shape: new CANNON.Box(new CANNON.Vec3(13, 8, 16)),
     linearDamping: 0.55,
     angularDamping: 0.85
   });
@@ -1079,9 +956,8 @@ function spawnRoverOnPlanet({
   climb.t = 0;
 }
 
-// Mesh visual FBX
-  
-  // Mesh visual FBX
+
+
 const fbxLoader = new THREE.FBXLoader();
 fbxLoader.load('models/mars_explorer.fbx', (obj) => {
   player = obj;
@@ -1091,30 +967,30 @@ fbxLoader.load('models/mars_explorer.fbx', (obj) => {
     applyRoverTextures(player);
   }
 
-  // Activa sombras en todas las mallas
+
   player.traverse((child) => {
     if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
   });
 
-  // Efecto de propulsor (opcional)
+
   const fx = makeThrusterFlame();
   thrusterFX = fx;
   fx.group.position.set(0, 5, 0);
   player.add(fx.group);
 
-  // Sonido posicional si ya está cargado
+
   if (thruster && thrusterLoaded) player.add(thruster);
 
-  // Coloca y escala según lo último que te haya pedido el spawner
+
   finalizeRoverMeshPlacement();
 
-  // Ruedas
+
   setupRoverWheels(player);
 
-  // Añade a escena si no estaba
+
   if (!player.parent) scene.add(player);
 
-  // Target de cámara si lo calculas a partir del bbox
+
   tryUpdateCamTargetFromPlayer();
 
 }, undefined, (err) => {
@@ -1125,14 +1001,14 @@ fbxLoader.load('models/mars_explorer.fbx', (obj) => {
 function finalizeRoverMeshPlacement() {
   if (!player || !roverSpawnPoint) return;
 
-  // Escala el rover para que su altura ~ roverDesiredHeight
+
   const bbox = new THREE.Box3().setFromObject(player);
   const sz = new THREE.Vector3(); bbox.getSize(sz);
   const s = sz.y > 1e-4 ? (roverDesiredHeight / sz.y) : 1;
   player.scale.set(s, s, s);
   player.updateMatrixWorld(true);
 
-  // Coloca en el último spawn calculado
+
   player.position.copy(roverSpawnPoint);
   player.updateMatrixWorld(true);
 }
@@ -1152,11 +1028,6 @@ function tryUpdateCamTargetFromPlayer() {
   }
 }
 
-
-
-
-
-// 2) loader con cach� y manager
 function loadScene() {
   scene.add(new THREE.AmbientLight(0xffffff, 0.25));
   const starLight = new THREE.PointLight(0xffffff, 0.6, 0);
@@ -1240,15 +1111,13 @@ function loadScene() {
       mat.envMapIntensity = 2.0;
 
 
-      // Reflejos del environment m?s visibles
-      mat.envMapIntensity = 2.0;  // antes 1
+      mat.envMapIntensity = 2.0;
 
-      // Un pel?n m?s de relieve para micro-brillos
+
       if (mat.normalMap) mat.normalScale.set(1.15, 1.15);
 
       return mat;
     };
-
 
     const baseMaterial = makeMaterial();
 
@@ -1335,8 +1204,8 @@ function loadScene() {
     planetMesh.add(ring);
   };
 
-  // Crea planeta (visual + f�sico) y lo registra en planets[]
-  // Crea planeta (visual + f�sico) y lo registra en planets[]
+
+
   const PLANET_ORBIT_RADIUS = 5200;
   const PLANET_ORBIT_DIAGONAL = PLANET_ORBIT_RADIUS * Math.SQRT1_2;
 
@@ -1359,7 +1228,7 @@ function loadScene() {
     scene.add(lod);
     if (ringAlpha) addRingAlpha(hi, ringAlpha);
 
-    // F�sico (esfera est�tica)
+
     const body = new CANNON.Body({
       mass: 0,
       material: planetMat,
@@ -1367,9 +1236,9 @@ function loadScene() {
     });
     body.position.set(position.x, position.y, position.z);
     world.addBody(body);
-    //addColliderHelper(body, { color: 0xffaa00, opacity: 0.25 });
 
-    // mu = g_surface * R^2 -> g(r) = mu / r^2 (aceleraci�n en unidades de juego)
+
+
     const mu = surfaceG * radius * radius;
 
     const planet = { name, radius, mesh: lod, body, surfaceG, mu };
@@ -1386,7 +1255,7 @@ function loadScene() {
   };
 
   createPlanet({
-    name: 'Aresis', // Mars
+    name: 'Aresis',
     radius: 900,
     position: new THREE.Vector3(PLANET_ORBIT_RADIUS, 0, 0),
     mapPath: 'textures/5672_mars_12k_color.jpg',
@@ -1397,7 +1266,7 @@ function loadScene() {
     ]
   });
   createPlanet({
-    name: 'Nivalis', // Moon
+    name: 'Nivalis',
     radius: 880,
     position: new THREE.Vector3(PLANET_ORBIT_DIAGONAL, 0, PLANET_ORBIT_DIAGONAL),
     mapPath: 'textures/8k_moon.jpg',
@@ -1407,7 +1276,7 @@ function loadScene() {
     ]
   });
   createPlanet({
-    name: 'Zephyria', // Venus
+    name: 'Zephyria',
     radius: 940,
     position: new THREE.Vector3(0, 0, PLANET_ORBIT_RADIUS),
     mapPath: 'textures/8k_venus_surface.jpg',
@@ -1418,7 +1287,7 @@ function loadScene() {
     ]
   });
   createPlanet({
-    name: 'Volturn', // Mercury
+    name: 'Volturn',
     radius: 870,
     position: new THREE.Vector3(-PLANET_ORBIT_DIAGONAL, 0, PLANET_ORBIT_DIAGONAL),
     mapPath: 'textures/8k_mercury.jpg',
@@ -1430,7 +1299,7 @@ function loadScene() {
   {
     const borealisRadius = 950;
     createPlanet({
-      name: 'Borealis', // Saturn
+      name: 'Borealis',
       radius: borealisRadius,
       position: new THREE.Vector3(-PLANET_ORBIT_RADIUS, 0, 0),
       mapPath: 'textures/8k_saturn.jpg',
@@ -1449,7 +1318,7 @@ function loadScene() {
     });
   }
   createPlanet({
-    name: 'Xanth', // Jupiter
+    name: 'Xanth',
     radius: 980,
     position: new THREE.Vector3(-PLANET_ORBIT_DIAGONAL, 0, -PLANET_ORBIT_DIAGONAL),
     mapPath: 'textures/8k_jupiter.jpg',
@@ -1460,7 +1329,7 @@ function loadScene() {
     ]
   });
   createPlanet({
-    name: 'Azure', // Neptune
+    name: 'Azure',
     radius: 920,
     position: new THREE.Vector3(0, 0, -PLANET_ORBIT_RADIUS),
     mapPath: 'textures/2k_neptune.jpg',
@@ -1470,7 +1339,7 @@ function loadScene() {
     ]
   });
   createPlanet({
-    name: 'Cyanis', // Uranus
+    name: 'Cyanis',
     radius: 910,
     position: new THREE.Vector3(PLANET_ORBIT_DIAGONAL, 0, -PLANET_ORBIT_DIAGONAL),
     mapPath: 'textures/2k_uranus.jpg',
@@ -1500,13 +1369,13 @@ function loadScene() {
     (err) => console.error('No se pudo cargar models/model.dae:', err)
   );
 
-  // Spawnear Rover en Nivalis (lat/lon a gusto)
+
   spawnRoverOnPlanet({ planetName: 'Nivalis', latDeg: 8, lonDeg: 120, heightMeters: 20, altitudeOffset: 14 });
 
   const tex = new THREE.TextureLoader().load('image.png');
-  tex.encoding = THREE.sRGBEncoding; // mismo encoding que usas
-  tex.mapping = THREE.EquirectangularReflectionMapping; // mapea como fondo esf�rico
-  scene.background = tex; // �listo!
+  tex.encoding = THREE.sRGBEncoding;
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  scene.background = tex;
 }
 
 function prepareCollectibleTemplate(root) {
@@ -1668,7 +1537,7 @@ function getVec3From(v) {
   return new THREE.Vector3(v.x, v.y, v.z);
 }
 
-const GROUND_EPS = 8; // tolerancia de altura para considerar "en suelo"
+const GROUND_EPS = 8;
 
 function altitudeToPlanet(body, planet) {
   if (!body || !planet) return Infinity;
@@ -1676,7 +1545,7 @@ function altitudeToPlanet(body, planet) {
   const c = new THREE.Vector3(
     planet.body.position.x, planet.body.position.y, planet.body.position.z
   );
-  return p.distanceTo(c) - planet.radius; // >0: en el aire, ~0: tocando
+  return p.distanceTo(c) - planet.radius;
 }
 
 function isGrounded(body, planet, eps = GROUND_EPS) {
@@ -1684,68 +1553,39 @@ function isGrounded(body, planet, eps = GROUND_EPS) {
   return alt <= eps;
 }
 
-
-// aceleraci�n por un planeta en un punto (THREE.Vector3)
 function gravityFromPlanetAt(planet, posW) {
   const c = getVec3From(planet.body.position);
-  const rVec = c.sub(posW); // hacia el centro
+  const rVec = c.sub(posW);
   const r2 = Math.max(rVec.lengthSq(), 1e-6);
-  const acc = planet.mu / r2; // magnitud de aceleraci�n
+  const acc = planet.mu / r2;
   return rVec.normalize().multiplyScalar(acc);
 }
 
-// aceleraci�n total por todos los planetas
 function totalGravityAt(posW) {
   const a = new THREE.Vector3();
   for (const p of planets) a.add(gravityFromPlanetAt(p, posW.clone()));
-  return a; // m/s^2 en unidades de juego
+  return a;
 }
 
-// planeta dominante (el que m�s acelera en posW)
 function dominantPlanetAt(posW) {
   let best = null, bestAcc = -Infinity;
   for (const p of planets) {
-    const a = gravityFromPlanetAt(p, posW.clone()).lengthSq(); // comparar por |a|^2
+    const a = gravityFromPlanetAt(p, posW.clone()).lengthSq();
     if (a > bestAcc) { bestAcc = a; best = p; }
   }
   return best;
 }
 
-
-// --- util: planeta "tocando" (o m�s cercano a la superficie) ---
-function findPlanetUnder(body) {
-  if (!planets.length) return null;
-  let best = null;
-  let bestErr = Infinity;
-  for (const p of planets) {
-    const dx = body.position.x - p.body.position.x;
-    const dy = body.position.y - p.body.position.y;
-    const dz = body.position.z - p.body.position.z;
-    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    const err = Math.abs(d - p.radius); // cu�n cerca de la superficie est�
-    if (err < bestErr) { bestErr = err; best = p; }
-  }
-  return best;
-}
-
-// F�sica: gravedad radial hacia el centro indicado
-function applyRadialGravity(body, centerVec3, g = 150) {
-  const p = new THREE.Vector3(body.position.x, body.position.y, body.position.z);
-  const dirToCenter = centerVec3.clone().sub(p).normalize();
-  const F = dirToCenter.multiplyScalar(g * body.mass);
-  body.applyForce(new CANNON.Vec3(F.x, F.y, F.z), body.position);
-}
-
 function applyPlanetaryGravity(body) {
   const pos = new THREE.Vector3(body.position.x, body.position.y, body.position.z);
 
-  // Si ya hay planeta dominante, usa S�LO su gravedad.
-  // (Antes: sumaba todas con totalGravityAt)
+
+
   let acc;
   if (currentPlanet) {
     acc = gravityFromPlanetAt(currentPlanet, pos);
   } else {
-    // Fallback inicial por si a�n no hay dominante decidido
+
     acc = totalGravityAt(pos);
   }
 
@@ -1753,14 +1593,12 @@ function applyPlanetaryGravity(body) {
   body.applyForce(new CANNON.Vec3(F.x, F.y, F.z), body.position);
 }
 
-
-// Controles WASD con heading persistente (tangente al planeta actual)
 function applyRoverControls(body, dt, planetCenter, thrust = THRUST, turnSpeed = TURN_SPEED, gHere = 10, { allowYaw = true, grounded = false } = {}) {
   const p = new THREE.Vector3(body.position.x, body.position.y, body.position.z);
-  const up = p.clone().sub(planetCenter).normalize(); // normal local del planeta dominante
+  const up = p.clone().sub(planetCenter).normalize();
   const vel = new THREE.Vector3(body.velocity.x, body.velocity.y, body.velocity.z);
 
-  // proyecta heading al tangente
+
   roverHeading.addScaledVector(up, -roverHeading.dot(up));
   if (roverHeading.lengthSq() < 1e-10) {
     const any = Math.abs(up.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
@@ -1768,7 +1606,7 @@ function applyRoverControls(body, dt, planetCenter, thrust = THRUST, turnSpeed =
   }
   roverHeading.normalize();
 
-  // giro A/D
+
   let yawDelta = 0;
   if (allowYaw) {
     if (keys.a) yawDelta += turnSpeed * dt;
@@ -1776,7 +1614,7 @@ function applyRoverControls(body, dt, planetCenter, thrust = THRUST, turnSpeed =
   }
   if (yawDelta !== 0) roverHeading.applyAxisAngle(up, yawDelta).normalize();
 
-  // avance W/S
+
   let input = 0;
   if (keys.w) input += 1;
   if (keys.s) input -= 1;
@@ -1786,31 +1624,31 @@ function applyRoverControls(body, dt, planetCenter, thrust = THRUST, turnSpeed =
     body.applyForce(F, body.position);
   }
 
-  // ===== Control vertical =====
 
-  // 1) Descenso con C: fuerza hacia abajo (hacia el centro)
+
+
   if (keys.c) {
-    climb.active = false; // asegurar que no hay rampa arriba
+    climb.active = false;
     const FdownMag = gHere * DOWN_THRUST_MULT;
     const Fdown = up.clone().multiplyScalar(-FdownMag);
     body.applyForce(new CANNON.Vec3(Fdown.x, Fdown.y, Fdown.z), body.position);
 
-    // 2) Despegue con rampa (empieza lento y coge velocidad est�ndar)
+
   } else if (climb.active) {
     const t01 = Math.min(1, climb.t / TAKEOFF_RAMP_S);
-    const smooth = t01 * t01 * (3 - 2 * t01); // smoothstep 0?1
+    const smooth = t01 * t01 * (3 - 2 * t01);
     const vTarget = ASCENT_V_STD * smooth;
 
     vel.set(body.velocity.x, body.velocity.y, body.velocity.z);
     const vUp = vel.dot(up);
 
-    const aCmd = gHere + CLIMB_GAIN * (vTarget - vUp); // compensar peso + corregir velocidad
+    const aCmd = gHere + CLIMB_GAIN * (vTarget - vUp);
     const F = up.clone().multiplyScalar(body.mass * aCmd);
     body.applyForce(new CANNON.Vec3(F.x, F.y, F.z), body.position);
 
-    if (!keys.space && t01 >= 1) climb.active = false; // fin rampa si sueltas Space
+    if (!keys.space && t01 >= 1) climb.active = false;
 
-    // 3) Empuje vertical cl�sico con Space (por si quieres mantenerlo)
+
   } else if (keys.space) {
     const FupMag = gHere * UP_THRUST_MULT;
     const Fup = up.clone().multiplyScalar(FupMag);
@@ -1854,22 +1692,17 @@ function applyRoverControls(body, dt, planetCenter, thrust = THRUST, turnSpeed =
 
 
 
-  // ===== fin despegue con rampa =====
-
 }
-
-
-// Sincronizar mesh con cuerpo f�sico (orientado por up y heading)
 
 function syncRoverMeshToBody(planetCenter) {
   if (!player || !roverBody) return;
 
   const bodyPos = new THREE.Vector3(roverBody.position.x, roverBody.position.y, roverBody.position.z);
 
-  // Calcular "up" interpolado entre planeta anterior y actual
+
   let up;
   if (previousPlanet && planetTransitionT < 1.0) {
-    // Up del planeta anterior
+
     const prevCenter = new THREE.Vector3(
       previousPlanet.body.position.x,
       previousPlanet.body.position.y,
@@ -1877,20 +1710,20 @@ function syncRoverMeshToBody(planetCenter) {
     );
     const upPrev = bodyPos.clone().sub(prevCenter).normalize();
 
-    // Up del planeta actual
+
     const upCurrent = bodyPos.clone().sub(planetCenter).normalize();
 
-    // Interpolar (slerp para rotaci�n suave)
+
     up = new THREE.Vector3().lerpVectors(upPrev, upCurrent, planetTransitionT).normalize();
   } else {
-    // Sin transici�n, usar directamente el up actual
+
     up = bodyPos.clone().sub(planetCenter).normalize();
   }
 
   const visualPos = bodyPos.clone().addScaledVector(up, ROVER_VISUAL_OFFSET);
   player.position.copy(visualPos);
 
-  // Orientaci�n estable con el "up" interpolado
+
   const fwd = roverHeading.clone().addScaledVector(up, -roverHeading.dot(up)).normalize();
   const right = up.clone().cross(fwd).normalize();
   fwd.copy(right.clone().cross(up)).normalize();
@@ -1903,7 +1736,7 @@ function syncRoverMeshToBody(planetCenter) {
 
 function initCamInput() {
   const el = renderer.domElement;
-  el.style.touchAction = 'none'; // evita el scroll en t�ctil
+  el.style.touchAction = 'none';
 
   el.addEventListener('pointerdown', onCamPointerDown);
   el.addEventListener('pointermove', onCamPointerMove);
@@ -1926,11 +1759,11 @@ function onCamPointerMove(e) {
   _lastX = e.clientX;
   _lastY = e.clientY;
 
-  // yaw izquierda/derecha y pitch arriba/abajo
+
   camUserYaw += dx * ORBIT.sensitivity;
   camUserPitch += dy * ORBIT.sensitivity;
 
-  // clamp pitch
+
   camUserPitch = Math.max(ORBIT.pitchMin, Math.min(ORBIT.pitchMax, camUserPitch));
 }
 function onCamPointerUp(e) {
@@ -1938,21 +1771,19 @@ function onCamPointerUp(e) {
   try { renderer.domElement.releasePointerCapture(e.pointerId); } catch { }
 }
 function onCamWheel(e) {
-  // zoom: modifica la distancia detr�s del rover
+
   FOLLOW.back = THREE.MathUtils.clamp(FOLLOW.back + e.deltaY * 0.25, 10, 2000);
 }
 
-
-// --- C�mara de persecuci�n suavizada (posici�n + rotaci�n con slerp) ---
 function updateChaseCamera(dt) {
-  // Desactiva OrbitControls en modo follow (si los alternas con 'C', respeta su estado)
+
   if (cameraControls && cameraControls.enabled) {
     cameraControls.update();
     return;
   }
   if (!(roverBody && currentPlanet)) return;
 
-  // Posiciones base
+
   const roverPos = new THREE.Vector3(
     roverBody.position.x, roverBody.position.y, roverBody.position.z
   );
@@ -1960,10 +1791,10 @@ function updateChaseCamera(dt) {
     currentPlanet.body.position.x, currentPlanet.body.position.y, currentPlanet.body.position.z
   );
 
-  // Up local (normal de la superficie) - CON INTERPOLACI�N DE TRANSICI�N
+
   let upDesired;
   if (previousPlanet && planetTransitionT < 1.0) {
-    // Up del planeta anterior
+
     const prevCenter = new THREE.Vector3(
       previousPlanet.body.position.x,
       previousPlanet.body.position.y,
@@ -1971,17 +1802,17 @@ function updateChaseCamera(dt) {
     );
     const upPrev = roverPos.clone().sub(prevCenter).normalize();
 
-    // Up del planeta actual
+
     const upCurrent = roverPos.clone().sub(planetCenter).normalize();
 
-    // Interpolar entre ambos
+
     upDesired = new THREE.Vector3().lerpVectors(upPrev, upCurrent, planetTransitionT).normalize();
   } else {
-    // Sin transici�n, usar directamente el up actual
+
     upDesired = roverPos.clone().sub(planetCenter).normalize();
   }
 
-  // Heading deseado (proyecci�n tangente, estable en polos)
+
   let headingDesired = roverHeading.clone().addScaledVector(upDesired, -roverHeading.dot(upDesired));
   if (headingDesired.lengthSq() < 1e-8) {
     headingDesired = new THREE.Vector3(1, 0, 0).cross(upDesired).normalize();
@@ -1989,39 +1820,39 @@ function updateChaseCamera(dt) {
     headingDesired.normalize();
   }
 
-  // Coefs de suavizado (FR-independent)
+
   const aPos = 1 - Math.exp(- (FOLLOW?.lerpPosHz ?? 6) * dt);
   const aRot = 1 - Math.exp(- (FOLLOW?.lerpRotHz ?? 8) * dt);
   const aTarget = 1 - Math.exp(- (FOLLOW?.lerpTargetHz ?? 10) * dt);
 
-  // Suavizar up y heading
+
   camState.up.lerp(upDesired, aRot).normalize();
   camState.heading.lerp(headingDesired, aRot).normalize();
 
-  // Si no est�s arrastrando, que los offsets vuelvan suavemente a 0
+
   if (!camDragging) {
     const aRet = 1 - Math.exp(- ORBIT.returnHz * dt);
     camUserYaw += (0 - camUserYaw) * aRet;
     camUserPitch += (0 - camUserPitch) * aRet;
   }
 
-  // Construir offset detr�s y arriba con yaw/pitch del usuario
+
   const back = (FOLLOW?.back ?? 20);
   const height = (FOLLOW?.up ?? 200);
 
-  // Direcci�n base: "detr�s" del rover
+
   const behindDir = camState.heading.clone().negate().normalize();
 
-    // Aplica la rotaci�n de yaw alrededor de "up"
-  const yaw = VIEW_BIAS.yaw + camUserYaw;               // sesgo + interacción del usuario
+
+  const yaw = VIEW_BIAS.yaw + camUserYaw;
   const offsetDir = behindDir.clone().applyAxisAngle(camState.up, yaw);
-  // Eje right para aplicar pitch relativo al offset actual
+
   const right = camState.up.clone().cross(offsetDir).normalize();
 
-  // Aplica pitch (inclinar arriba/abajo)
+
   offsetDir.applyAxisAngle(right, camUserPitch).normalize();
 
-  // Posici�n deseada = detr�s + arriba
+
   const extraLift = (FOLLOW?.postLookLift ?? 0);
   const desiredPos = roverPos.clone()
     .addScaledVector(offsetDir, back)
@@ -2035,12 +1866,12 @@ function updateChaseCamera(dt) {
     targetDesired = TMP_VEC_H.copy(roverPos).addScaledVector(camState.up, ROVER_VISUAL_OFFSET);
   }
 
-  // Lerp pos y objetivo
+
   camState.pos.lerp(desiredPos, aPos);
   if (camState.target.lengthSq() === 0) camState.target.copy(targetDesired);
   camState.target.lerp(targetDesired, aTarget);
 
-  // Rotaci�n por lookAt con up suavizado
+
   const lookM = new THREE.Matrix4().lookAt(camState.pos, camState.target, camState.up);
   const qDesired = new THREE.Quaternion().setFromRotationMatrix(lookM);
   camera.quaternion.slerp(qDesired, aRot);
@@ -2050,11 +1881,6 @@ function updateChaseCamera(dt) {
   camera.position.addScaledVector(camState.up, FOLLOW.postLookNudge);
 }
 
-
-
-
-
-// 3) resto igual
 function updateAspectRatio() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -2065,26 +1891,25 @@ function updateAspectRatio() {
 function updateThrusterAudio(dt, upVec) {
   if (!thruster || !thrusterLoaded || !thruster.isPlaying) return;
 
-  // Target de volumen: suena si mantienes Space o si la rampa de despegue est� activa
+
   const targetVol = (keys.space || climb.active) ? THRUSTER_MAX_VOL : 0.0;
 
-  // Fade exponencial suave
+
   const a = 1 - Math.exp(-THRUSTER_FADE_HZ * dt);
   _thrusterVol += (targetVol - _thrusterVol) * a;
   thruster.setVolume(Math.max(0, Math.min(1, _thrusterVol)));
 
-  // Opcional: cambia el pitch seg�n la velocidad vertical (m�s agudo al subir)
+
   if (roverBody && upVec) {
     const vel = new THREE.Vector3(roverBody.velocity.x, roverBody.velocity.y, roverBody.velocity.z);
-    const vUp = vel.dot(upVec); // + sube, - baja
-    // Normaliza [ -ASCENT_V_STD, +ASCENT_V_STD ] -> [0,1]
+    const vUp = vel.dot(upVec);
+
     const t = THREE.MathUtils.clamp((vUp + ASCENT_V_STD) / (2 * ASCENT_V_STD), 0, 1);
     const rate = THREE.MathUtils.lerp(THRUSTER_MIN_RATE, THRUSTER_MAX_RATE, t);
-    // Audio de Three tiene setter espec�fico:
+
     thruster.setPlaybackRate(rate);
   }
 }
-
 
 function update() {
   const dt = clock.getDelta();
@@ -2106,25 +1931,25 @@ function update() {
       }
     }
 
-    // planeta dominante por gravedad
+
     const dom = dominantPlanetAt(pos);
     if (dom && dom !== currentPlanet) {
       previousPlanet = currentPlanet;
       currentPlanet = dom;
-      planetTransitionT = 0.0; // inicia transici�n de up para c�mara/visual
+      planetTransitionT = 0.0;
     }
     if (planetTransitionT < 1.0) {
       planetTransitionT = Math.min(1.0, planetTransitionT + PLANET_TRANSITION_SPEED * dt);
     }
 
-    // gravedad total aplicada al body
+
     applyPlanetaryGravity(roverBody);
 
-    // g local DEL DOMINANTE (para el propulsor y para controles)
+
     const aDom = gravityFromPlanetAt(currentPlanet, pos);
     const gHere = aDom.length();
 
-    // controles respecto al planeta dominante
+
     const c = new THREE.Vector3(currentPlanet.body.position.x, currentPlanet.body.position.y, currentPlanet.body.position.z);
     const up = pos.clone().sub(c).normalize();
     const grounded = isGrounded(roverBody, currentPlanet);
@@ -2135,7 +1960,7 @@ function update() {
     );
     const tangentialVelocity = velocity.clone().addScaledVector(up, -velocity.dot(up));
     const movingTangentially = tangentialVelocity.length() > ROVER_MIN_STEER_SPEED;
-    // Limita el giro en suelo a momentos con desplazamiento real; en el aire se mantiene permitido
+
     const allowYaw = !grounded || movingTangentially;
     const allowVisualSteer = grounded;
 
@@ -2159,20 +1984,19 @@ function update() {
       sunDirLight.shadow.camera.updateMatrixWorld();
     }
 
-    // 1) suaviza la direcci?n visual
+
     updateSteer(dt, allowVisualSteer);
 
-    // 2) rota/dirige las ruedas (visual)
+
     updateRoverWheels(dt, up);
     updateThrusterAudio(dt, up);
 
-    // step f?sica
+
     world.step(1 / 60, dt, 3);
 
-    // visual (tu funci�n ya interpola el up con transici�n)
-    syncRoverMeshToBody(c);
-    updateThrusterFX(dt /*, up */);
 
+    syncRoverMeshToBody(c);
+    updateThrusterFX(dt );
 
   } else {
     if (world) world.step(1 / 60, dt, 3);
@@ -2180,24 +2004,21 @@ function update() {
 
   updateCollectibles(dt);
   updateChaseCamera(dt);
-  syncColliderHelpers();
 }
 
-
-
-function updateThrusterFX(dt /*, upVec opcional */) {
+function updateThrusterFX(dt ) {
   if (!thrusterFX || !thrusterFX.group) return;
 
-  // Intensidad: Space o rampa de despegue
+
   let target = (keys.space || climb.active) ? 1.0 : 0.0;
 
-  // Si usas el audio del thruster, acompasa la intensidad (opcional)
+
   if (typeof _thrusterVol === 'number') {
     const v = THREE.MathUtils.clamp(_thrusterVol / (THRUSTER_MAX_VOL || 1), 0, 1);
     target = Math.max(target, v);
   }
 
-  // Suavizado + flicker
+
   const ud = thrusterFX.group.userData;
   const a = 1 - Math.exp(-8.0 * dt);
   ud.intensity += (target - ud.intensity) * a;
@@ -2206,72 +2027,44 @@ function updateThrusterFX(dt /*, upVec opcional */) {
   const flicker = 0.90 + 0.10 * Math.sin(ud.flickerT*3.1) * Math.sin(ud.flickerT*2.3);
   const k = ud.intensity * flicker;
 
-  // Escalas (altura en Y, radio en X/Z). Se estira HACIA ABAJO porque el v?rtice est? en el origen.
+
   const coreH = 12 + 40*k, coreR = 3 + 7*k;
   const glowH = 20 + 80*k, glowR = 7 + 24*k;
 
   thrusterFX.core.scale.set(coreR, coreH, coreR);
   thrusterFX.glow.scale.set(glowR, glowH, glowR);
 
-  // Opacidades
+
   thrusterFX.core.material.opacity = 0.35 + 0.65*k;
   thrusterFX.glow.material.opacity = 0.20 + 0.60*k;
 
-  // Visible solo si hay algo de intensidad
+
   thrusterFX.group.visible = (ud.intensity > 0.02);
 }
-
-
-
 
 function render() {
   requestAnimationFrame(render);
   update();
 
-  // principal
+
 
   renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height);
   renderer.clear(true, true, true);
   renderer.render(scene, camera);
 
-  // minimapa �hacia arriba� desde el rover
+
   renderMinimapUp();
 }
 
-// ===== Llama simple por sprites (n?cleo + halo) =====
 let thrusterFX = null;
-
-function createRadialCanvasTexture({ size = 128, stops = [
-  { r:255,g:255,b:255,a:1.0, t:0.00 },  // blanco (n?cleo)
-  { r:255,g:200,b: 50,a:0.85,t:0.25 },  // amarillo c?lido
-  { r:255,g:100,b:  0,a:0.50,t:0.55 },  // naranja
-  { r:255,g: 30,b:  0,a:0.10,t:0.90 },  // rojo casi transparente
-  { r:255,g:  0,b:  0,a:0.00,t:1.00 }   // borde 100% transparente
-]} = {}) {
-  const cvs = document.createElement('canvas');
-  cvs.width = cvs.height = size;
-  const ctx = cvs.getContext('2d');
-
-  const grd = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
-  for (const s of stops) {
-    grd.addColorStop(s.t, `rgba(${s.r},${s.g},${s.b},${s.a})`);
-  }
-  ctx.fillStyle = grd;
-  ctx.fillRect(0,0,size,size);
-
-  const tex = new THREE.CanvasTexture(cvs);
-  tex.encoding = THREE.sRGBEncoding;
-  tex.needsUpdate = true;
-  return tex;
-}
 
 function createVerticalGradientTexture({
   size = 256,
   stops = [
-    { r:255,g:255,b:255,a:1.00, t:0.00 }, // blanco vivo en la tobera
-    { r:255,g:170,b: 50,a:0.80, t:0.25 }, // amarillo
-    { r:255,g: 90,b:  0,a:0.35, t:0.65 }, // naranja
-    { r:255,g:  0,b:  0,a:0.00, t:1.00 }  // se desvanece
+    { r:255,g:255,b:255,a:1.00, t:0.00 },
+    { r:255,g:170,b: 50,a:0.80, t:0.25 },
+    { r:255,g: 90,b:  0,a:0.35, t:0.65 },
+    { r:255,g:  0,b:  0,a:0.00, t:1.00 }
   ]
 } = {}) {
   const cvs = document.createElement('canvas');
@@ -2293,7 +2086,7 @@ function makeThrusterFlame() {
   const group = new THREE.Group();
   group.name = 'thrusterFX';
 
-  // Texturas 1D (vertical) para el core y el glow
+
   const coreTex = createVerticalGradientTexture();
   const glowTex = createVerticalGradientTexture({
     stops: [
@@ -2304,9 +2097,9 @@ function makeThrusterFlame() {
     ]
   });
 
-  // Cono unidad (radio=1, alto=1) con el v?rtice en el ORIGEN y extendi?ndose hacia -Y
+
   const unitCone = new THREE.ConeGeometry(1, 1, 24, 1, true);
-  unitCone.translate(0, -0.5, 0); // apex (0,0,0), base en y=-1
+  unitCone.translate(0, -0.5, 0);
 
   const commonMat = {
     map: null,
@@ -2325,7 +2118,7 @@ function makeThrusterFlame() {
     new THREE.MeshBasicMaterial({ ...commonMat, map: glowTex, opacity: 0.6 })
   );
 
-  // Orden de dibujo: primero glow, luego core (m?s ?fuego?)
+
   glow.renderOrder = 1;
   core.renderOrder = 2;
 
@@ -2337,36 +2130,6 @@ function makeThrusterFlame() {
   return { group, core, glow };
 }
 
-
-
-
-// boot
 init();
 loadScene();
-// El LoadingManager avisa cuando todo est? cargado y dejamos que el jugador pulse Play.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
