@@ -9,6 +9,14 @@ let startOverlayEl = null;
 let startButtonEl = null;
 let startButtonLabel = '';
 
+let gameOver = false;
+let gameOverOverlay = null;
+const GAME_OVER_RESTART_MS = 2600;
+const SUN_DESTRUCTION_MARGIN = 40;
+
+let roverSpawnPoint = null;       // Vector3 del último spawn calculado
+let roverDesiredHeight = 20;      // altura visual del rover (en tus unidades)
+
 // --- Audio (propulsor) ---
 let audioListener, thruster = null, thrusterLoaded = false;
 let _thrusterVol = 0;
@@ -94,6 +102,10 @@ let previousPlanet = null;
 let planetTransitionT = 1.0; // 0=antiguo, 1=nuevo (completado)
 const PLANET_TRANSITION_SPEED = 0.2; // velocidad de transici�n
 
+function getPlanetByName(name) {
+  return planets.find((p) => p && p.name === name) || null;
+}
+
 // Collectibles (modelos DAE)
 const collectibles = [];
 const collectibleSpawns = [];
@@ -122,6 +134,7 @@ const TMP_VEC_E = new THREE.Vector3();
 const TMP_VEC_F = new THREE.Vector3();
 const TMP_VEC_G = new THREE.Vector3();
 const TMP_VEC_H = new THREE.Vector3();
+const TMP_VEC_I = new THREE.Vector3();
 const TMP_BOX = new THREE.Box3();
 const TMP_SIZE = new THREE.Vector3();
 const TMP_QUAT_A = new THREE.Quaternion();
@@ -365,6 +378,7 @@ function init() {
   });
   initCollectibleUI();
   initMinimapHUD();
+  initGameOverOverlay();
 
   scene = new THREE.Scene();
 
@@ -454,6 +468,38 @@ function initCollectibleUI() {
   collectibleUI.textContent = 'Lunas restantes: --';
   container.appendChild(collectibleUI);
   updateCollectibleCounter();
+}
+
+
+function initGameOverOverlay() {
+  if (gameOverOverlay) return;
+
+  const container = document.getElementById('container');
+  if (!container) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'gameover-overlay';
+  Object.assign(overlay.style, {
+    position: 'fixed',
+    inset: '0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'none',
+    color: '#f4fbff',
+    fontFamily: '"Segoe UI", system-ui, sans-serif',
+    letterSpacing: '0.28em',
+    textTransform: 'uppercase',
+    fontSize: '26px',
+    textShadow: '0 0 28px rgba(0,0,0,0.85)',
+    background: 'radial-gradient(circle at 50% 50%, rgba(10, 32, 60, 0.52), rgba(2, 5, 12, 0.72))',
+    opacity: '0',
+    transition: 'opacity 0.45s ease',
+    zIndex: '14'
+  });
+  overlay.textContent = '';
+  container.appendChild(overlay);
+  gameOverOverlay = overlay;
 }
 
 function initMinimapHUD() {
@@ -626,6 +672,44 @@ function updateMinimapHUDTelemetry(planet, altitude, speed) {
     const speedText = Number.isFinite(speed) ? speed.toFixed(1) + ' m/s' : '---';
     minimapHUDVel.textContent = 'VEL ' + speedText;
   }
+}
+
+
+function triggerGameOver(message = 'ROVER DESTRUIDO') {
+  if (gameOver) return;
+
+  gameOver = true;
+
+  Object.keys(keys).forEach((key) => { keys[key] = false; });
+
+  if (thruster && typeof thruster.stop === 'function') {
+    try { thruster.stop(); } catch (e) { }
+    try { thruster.setVolume(0); } catch (e) { }
+  }
+  _thrusterVol = 0;
+  climb.active = false;
+
+  if (thrusterFX && thrusterFX.group) {
+    thrusterFX.group.visible = false;
+  }
+
+  initGameOverOverlay();
+  if (gameOverOverlay) {
+    gameOverOverlay.textContent = message;
+    gameOverOverlay.style.opacity = '1';
+  }
+
+  updateMinimapHUDTelemetry(null, null, null);
+
+  setTimeout(() => {
+    if (typeof window !== 'undefined' && window?.location?.reload) {
+      try {
+        window.location.reload();
+      } catch (err) {
+        console.warn('No se pudo recargar la página automáticamente:', err);
+      }
+    }
+  }, GAME_OVER_RESTART_MS);
 }
 
 function updateCollectibleCounter() {
@@ -913,17 +997,51 @@ function initPhysics() {
 }
 
 
-// === Spawner: coloca el rover �apoyado� sobre el Sol ===
-function spawnRoverOnSun({ latDeg = 8, lonDeg = 120, heightMeters = 1.6 } = {}) {
+// === Spawner: coloca el rover sobre un planeta objetivo ===
+function spawnRoverOnPlanet({
+  planetName = 'Nivalis',
+  latDeg = 8,
+  lonDeg = 120,
+  heightMeters = 1.6,
+  altitudeOffset = 12
+} = {}) {
+  const planet = getPlanetByName(planetName);
+  if (!planet || !planet.body) {
+    console.warn('No se encontró el planeta para spawnear el rover:', planetName);
+    return;
+  }
+
+  gameOver = false;
+  if (gameOverOverlay) {
+    gameOverOverlay.style.opacity = '0';
+    gameOverOverlay.textContent = '';
+  }
+
   const lat = THREE.MathUtils.degToRad(latDeg);
   const lon = THREE.MathUtils.degToRad(lonDeg);
-  const up = new THREE.Vector3(
+  const localUp = new THREE.Vector3(
     Math.cos(lat) * Math.cos(lon),
     Math.sin(lat),
     Math.cos(lat) * Math.sin(lon)
   ).normalize();
 
-  const spawn = up.clone().multiplyScalar(STAR_RADIUS);
+  const planetCenter = new THREE.Vector3(
+    planet.body.position.x,
+    planet.body.position.y,
+    planet.body.position.z
+  );
+  const surfacePoint = planetCenter.clone().addScaledVector(localUp, planet.radius);
+  const spawn = surfacePoint.clone().addScaledVector(localUp, altitudeOffset);
+
+  roverSpawnPoint  = spawn.clone();     // recuerda dónde hay que poner el mesh
+  roverDesiredHeight = heightMeters;    // recuerda a qué altura quieres escalarlo
+
+  // Si el mesh ya está cargado, posiciona/escala ahora:
+  if (player) finalizeRoverMeshPlacement();
+
+  if (roverBody) {
+    try { world.removeBody(roverBody); } catch { }
+  }
 
   roverBody = new CANNON.Body({
     mass: 100,
@@ -935,111 +1053,106 @@ function spawnRoverOnSun({ latDeg = 8, lonDeg = 120, heightMeters = 1.6 } = {}) 
   roverBody.position.set(spawn.x, spawn.y, spawn.z);
   world.addBody(roverBody);
 
-  //addColliderHelper(roverBody, { color: 0x00ffff, opacity: 0.5, onTop: true });
+  currentPlanet = planet;
+  previousPlanet = planet;
+  planetTransitionT = 1.0;
 
+  const any = Math.abs(localUp.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  roverHeading.copy(any.cross(localUp)).normalize();
 
-  // Inicializar heading tangente + c�mara (para evitar salto inicial)
-  {
-    const center = currentPlanet
-      ? new THREE.Vector3(currentPlanet.body.position.x, currentPlanet.body.position.y, currentPlanet.body.position.z)
-      : new THREE.Vector3(0, 0, 0);
-    const localUp = new THREE.Vector3(spawn.x, spawn.y, spawn.z).sub(center).normalize();
-    const any = Math.abs(localUp.y) < 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-    roverHeading.copy(any.cross(localUp)).normalize();
+  const camUp = localUp.clone();
+  const extraLift = (FOLLOW?.postLookLift ?? 0);
+  const camPos = spawn.clone()
+    .add(roverHeading.clone().negate().multiplyScalar(FOLLOW.back))
+    .add(camUp.clone().multiplyScalar(FOLLOW.up + extraLift));
 
-    const camUp = localUp.clone();
-    const extraLift = (FOLLOW?.postLookLift ?? 0);
+  camState.pos.copy(camPos);
+  camState.up.copy(camUp);
+  camState.heading.copy(roverHeading);
+  camState.target.copy(spawn).addScaledVector(camUp, ROVER_VISUAL_OFFSET);
 
-    
+  camera.position.copy(camState.pos);
+  const lookM = new THREE.Matrix4().lookAt(camState.pos, camState.target, camUp);
+  camera.quaternion.setFromRotationMatrix(lookM);
 
-    const camPos = new THREE.Vector3(spawn.x, spawn.y, spawn.z)
-      .add(roverHeading.clone().negate().multiplyScalar(FOLLOW.back))
-      .add(camUp.clone().multiplyScalar(FOLLOW.up + extraLift));
+  climb.active = false;
+  climb.t = 0;
+}
 
-    camState.pos.copy(camPos);
-    camState.up.copy(camUp);
-    camState.heading.copy(roverHeading);
-    camState.target.copy(spawn).addScaledVector(camUp, ROVER_VISUAL_OFFSET);
+// Mesh visual FBX
+  
+  // Mesh visual FBX
+const fbxLoader = new THREE.FBXLoader();
+fbxLoader.load('models/mars_explorer.fbx', (obj) => {
+  player = obj;
+  player.userData = player.userData || {};
 
-    // Colocar c?mara exacta al inicio (sin lerp)
-    camera.position.copy(camState.pos);
-    const lookM = new THREE.Matrix4().lookAt(camState.pos, camState.target, camUp);
-    camera.quaternion.setFromRotationMatrix(lookM);
+  if (typeof applyRoverTextures === 'function') {
+    applyRoverTextures(player);
   }
 
-  // Mesh visual FBX
-  const fbxLoader = new THREE.FBXLoader();
-  fbxLoader.load('models/mars_explorer.fbx', (obj) => {
-    player = obj;
-    player.userData = player.userData || {};
-
-    if (typeof applyRoverTextures === 'function') {
-      applyRoverTextures(player);
-    } else {
-      console.warn('Rover textures not ready when rover loaded');
-    }
-
-    const bbox = new THREE.Box3().setFromObject(player);
-    const sz = new THREE.Vector3();
-    bbox.getSize(sz);
-    const s = sz.y > 1e-4 ? (heightMeters / sz.y) : 1;
-    player.scale.set(s, s, s);
-
-    player.updateMatrixWorld(true);
-    const bboxScaled = new THREE.Box3().setFromObject(player);
-    const camTargetLocal = new THREE.Vector3();
-    bboxScaled.getCenter(camTargetLocal);
-    player.worldToLocal(camTargetLocal);
-    player.userData.camTargetOffset = camTargetLocal.clone();
-
-    player.position.copy(spawn);
-    player.updateMatrixWorld(true);
-
-    player.traverse((child) => {
-      if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
-    });
-    scene.add(player);
-    setupRoverWheels(player);
-
-    if (camState?.target) {
-      const worldCamTarget = camTargetLocal.clone();
-      player.localToWorld(worldCamTarget);
-      camState.target.copy(worldCamTarget);
-    }
-
-    const fx = makeThrusterFlame();
-    thrusterFX = fx;
-    fx.group.position.set(0, 5 , 0); // debajo del chasis; ajusta a tu modelo
-    player.add(fx.group);
-
-    player.add(fx.group);
-
-
-
-    // Animaci�n Idle (opcional)
-    try {
-      mixer = new THREE.AnimationMixer(player);
-      fbxLoader.load('models/Iddle.fbx', (anim) => {
-        const clip = anim.animations && anim.animations[0];
-        if (clip) {
-          const action = mixer.clipAction(clip);
-          actions['Idle'] = action;
-          action.play();
-          activeAction = action;
-        }
-      });
-    } catch (e) {
-      console.warn('No se pudo cargar animaci�n Idle:', e);
-    }
-
-    if (thruster && thrusterLoaded) {
-      player.add(thruster); // el sonido �sale� del rover
-    }
-
-
-
+  // Activa sombras en todas las mallas
+  player.traverse((child) => {
+    if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
   });
+
+  // Efecto de propulsor (opcional)
+  const fx = makeThrusterFlame();
+  thrusterFX = fx;
+  fx.group.position.set(0, 5, 0);
+  player.add(fx.group);
+
+  // Sonido posicional si ya está cargado
+  if (thruster && thrusterLoaded) player.add(thruster);
+
+  // Coloca y escala según lo último que te haya pedido el spawner
+  finalizeRoverMeshPlacement();
+
+  // Ruedas
+  setupRoverWheels(player);
+
+  // Añade a escena si no estaba
+  if (!player.parent) scene.add(player);
+
+  // Target de cámara si lo calculas a partir del bbox
+  tryUpdateCamTargetFromPlayer();
+
+}, undefined, (err) => {
+  console.error('No se pudo cargar el FBX del rover:', err);
+});
+;
+
+function finalizeRoverMeshPlacement() {
+  if (!player || !roverSpawnPoint) return;
+
+  // Escala el rover para que su altura ~ roverDesiredHeight
+  const bbox = new THREE.Box3().setFromObject(player);
+  const sz = new THREE.Vector3(); bbox.getSize(sz);
+  const s = sz.y > 1e-4 ? (roverDesiredHeight / sz.y) : 1;
+  player.scale.set(s, s, s);
+  player.updateMatrixWorld(true);
+
+  // Coloca en el último spawn calculado
+  player.position.copy(roverSpawnPoint);
+  player.updateMatrixWorld(true);
 }
+
+function tryUpdateCamTargetFromPlayer() {
+  if (!player) return;
+  const bboxScaled = new THREE.Box3().setFromObject(player);
+  const camTargetLocal = new THREE.Vector3();
+  bboxScaled.getCenter(camTargetLocal);
+  player.worldToLocal(camTargetLocal);
+  player.userData.camTargetOffset = camTargetLocal.clone();
+
+  if (camState?.target) {
+    const worldCamTarget = camTargetLocal.clone();
+    player.localToWorld(worldCamTarget);
+    camState.target.copy(worldCamTarget);
+  }
+}
+
+
 
 
 
@@ -1387,8 +1500,8 @@ function loadScene() {
     (err) => console.error('No se pudo cargar models/model.dae:', err)
   );
 
-  // Spawnear Rover en el Sol (lat/lon a gusto)
-  spawnRoverOnSun({ latDeg: 8, lonDeg: 120, heightMeters: 20 });
+  // Spawnear Rover en Nivalis (lat/lon a gusto)
+  spawnRoverOnPlanet({ planetName: 'Nivalis', latDeg: 8, lonDeg: 120, heightMeters: 20, altitudeOffset: 14 });
 
   const tex = new THREE.TextureLoader().load('image.png');
   tex.encoding = THREE.sRGBEncoding; // mismo encoding que usas
@@ -1975,12 +2088,23 @@ function updateThrusterAudio(dt, upVec) {
 
 function update() {
   const dt = clock.getDelta();
+  if (gameOver) return;
   if (climb.active) climb.t += dt;
 
   if (mixer) mixer.update(dt);
 
   if (roverBody && planets.length) {
     const pos = new THREE.Vector3(roverBody.position.x, roverBody.position.y, roverBody.position.z);
+
+    const sun = getPlanetByName('Sol');
+    if (sun && sun.body) {
+      const sunCenter = TMP_VEC_I.set(sun.body.position.x, sun.body.position.y, sun.body.position.z);
+      const killRadius = (sun.radius ?? STAR_RADIUS) + SUN_DESTRUCTION_MARGIN;
+      if (pos.distanceTo(sunCenter) <= killRadius) {
+        triggerGameOver('ROVER DESINTEGRADO');
+        return;
+      }
+    }
 
     // planeta dominante por gravedad
     const dom = dominantPlanetAt(pos);
