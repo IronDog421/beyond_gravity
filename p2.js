@@ -232,7 +232,7 @@ function renderMinimapUp() {
   const outerH = h + border * 2;
   const W = renderer.domElement.width;
   const H = renderer.domElement.height;
-  const vxOuter = W - outerW - pad;
+  const vxOuter = pad;
   const vyOuter = pad;
 
   const prevColor = renderer.getClearColor(TMP_COLOR);
@@ -424,7 +424,7 @@ function initCollectibleUI() {
     userSelect: 'none',
     textShadow: '0 0 6px rgba(0,0,0,0.75)'
   });
-  collectibleUI.textContent = 'Lunas restantes: --';
+  collectibleUI.textContent = 'Power Moon status: unavailable';
   container.appendChild(collectibleUI);
   updateCollectibleCounter();
 }
@@ -587,8 +587,10 @@ function updateMinimapHUDLayout() {
 
   minimapHUD.style.width = cssW + 'px';
   minimapHUD.style.height = cssH + 'px';
-  minimapHUD.style.right = cssPad + 'px';
-  minimapHUD.style.bottom = cssPad + 'px';
+  minimapHUD.style.left = cssPad + 'px';
+  minimapHUD.style.top = cssPad + 'px';
+  minimapHUD.style.right = 'auto';
+  minimapHUD.style.bottom = 'auto';
   minimapHUD.style.borderRadius = cssRadius + 'px';
 }
 
@@ -675,11 +677,11 @@ function updateCollectibleCounter() {
   const remaining = Math.max(0, total - collectiblesCollected);
 
   if (!total) {
-    collectibleUI.textContent = 'Lunas restantes: --';
+    collectibleUI.textContent = 'Power Moon status: unavailable';
   } else if (remaining === 0) {
-    collectibleUI.textContent = 'Todas las lunas recolectadas!';
+    collectibleUI.textContent = 'Power Moon status: all collected';
   } else {
-    collectibleUI.textContent = `Lunas restantes: ${remaining}`;
+    collectibleUI.textContent = `Power Moons remaining: ${remaining}`;
   }
 }
 
