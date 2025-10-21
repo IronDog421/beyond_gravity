@@ -29,7 +29,7 @@ let applyRoverTextures = null;
 let roverWheelInfos = [];
 let roverSteerAngle = 0;
 let roverSteerTarget = 0;
-const ROVER_MAX_STEER = THREE.MathUtils.degToRad(26);
+const ROVER_MAX_STEER = THREE.MathUtils.degToRad(45);
 const ROVER_STEER_HZ = 7.5;
 const ROVER_STEER_RETURN_HZ = 10.0;
 const ROVER_LATERAL_DAMP_HZ = 12.0;
@@ -2013,7 +2013,7 @@ function update() {
     const movingTangentially = tangentialVelocity.length() > ROVER_MIN_STEER_SPEED;
     // Limita el giro en suelo a momentos con desplazamiento real; en el aire se mantiene permitido
     const allowYaw = !grounded || movingTangentially;
-    const allowVisualSteer = grounded && movingTangentially;
+    const allowVisualSteer = grounded;
 
     applyRoverControls(roverBody, dt, c, THRUST, TURN_SPEED, gHere, { allowYaw, grounded });
 
