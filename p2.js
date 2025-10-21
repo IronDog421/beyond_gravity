@@ -16,7 +16,7 @@ let roverDesiredHeight = 20;
 let audioListener, thruster = null, thrusterLoaded = false;
 let _thrusterVol = 0;
 
-const THRUSTER_SOUND_URL = '/audio/propulsor.mp3';
+const THRUSTER_SOUND_URL = 'audio/propulsor.mp3';
 const THRUSTER_MAX_VOL = 0.8;
 const THRUSTER_FADE_HZ = 8.0;
 const THRUSTER_MIN_RATE = 0.90;
