@@ -75,7 +75,7 @@ let currentPlanet = null;
 let previousPlanet = null;
 let planetTransitionT = 1.0;
 const PLANET_TRANSITION_SPEED = 0.2;
-const PLANET_THRUST_LOCK_DURATION = 2.0; // Prevent re-accelerating immediately after planet switch
+const PLANET_THRUST_LOCK_DURATION = 2.0;
 let thrustLockTimer = 0;
 
 function getPlanetByName(name) {
@@ -97,7 +97,7 @@ const COLLECTIBLE_DEFAULTS = {
   pickupRadius: 150
 };
 const POWERMOON_LIGHT_COLOR = 0xfff6c9;
-const POWERMOON_LIGHT_INTENSITY = 20;
+const POWERMOON_LIGHT_INTENSITY = 2;
 const POWERMOON_LIGHT_DISTANCE = 2000;
 const POWERMOON_LIGHT_DECAY = 2.2;
 
@@ -880,7 +880,7 @@ function initPhysics() {
 }
 
 function spawnRoverOnPlanet({
-  planetName = 'Nivalis',
+  planetName = 'Volturn',
   latDeg = 8,
   lonDeg = 120,
   heightMeters = 1.6,
@@ -1374,7 +1374,7 @@ function loadScene() {
   );
 
 
-  spawnRoverOnPlanet({ planetName: 'Nivalis', latDeg: 8, lonDeg: 120, heightMeters: 20, altitudeOffset: 14 });
+  spawnRoverOnPlanet({ planetName: 'Volturn', latDeg: -8, lonDeg: 300, heightMeters: 20, altitudeOffset: 14 });
 
   const tex = new THREE.TextureLoader().load('image.png');
   tex.encoding = THREE.sRGBEncoding;
