@@ -75,6 +75,8 @@ let currentPlanet = null;
 let previousPlanet = null;
 let planetTransitionT = 1.0;
 const PLANET_TRANSITION_SPEED = 0.2;
+const PLANET_THRUST_LOCK_DURATION = 2.0; // Prevent re-accelerating immediately after planet switch
+let thrustLockTimer = 0;
 
 function getPlanetByName(name) {
   return planets.find((p) => p && p.name === name) || null;
@@ -1599,6 +1601,7 @@ function applyRoverControls(body, dt, planetCenter, thrust = THRUST, turnSpeed =
   const p = new THREE.Vector3(body.position.x, body.position.y, body.position.z);
   const up = p.clone().sub(planetCenter).normalize();
   const vel = new THREE.Vector3(body.velocity.x, body.velocity.y, body.velocity.z);
+  const throttleLocked = thrustLockTimer > 0;
 
 
   roverHeading.addScaledVector(up, -roverHeading.dot(up));
@@ -1618,8 +1621,10 @@ function applyRoverControls(body, dt, planetCenter, thrust = THRUST, turnSpeed =
 
 
   let input = 0;
-  if (keys.w) input += 1;
-  if (keys.s) input -= 1;
+  if (!throttleLocked) {
+    if (keys.w) input += 1;
+    if (keys.s) input -= 1;
+  }
   if (input !== 0) {
     const fwd = roverHeading;
     const F = new CANNON.Vec3(fwd.x * thrust * input, fwd.y * thrust * input, fwd.z * thrust * input);
@@ -1629,7 +1634,12 @@ function applyRoverControls(body, dt, planetCenter, thrust = THRUST, turnSpeed =
 
 
 
-  if (keys.c) {
+  if (throttleLocked) {
+    if (climb.active) {
+      climb.active = false;
+      climb.t = 0;
+    }
+  } else if (keys.c) {
     climb.active = false;
     const FdownMag = gHere * DOWN_THRUST_MULT;
     const Fdown = up.clone().multiplyScalar(-FdownMag);
@@ -1657,7 +1667,7 @@ function applyRoverControls(body, dt, planetCenter, thrust = THRUST, turnSpeed =
     body.applyForce(new CANNON.Vec3(Fup.x, Fup.y, Fup.z), body.position);
   }
 
-  if (grounded && input === 0 && !keys.space && !climb.active) {
+  if (grounded && input === 0 && (throttleLocked || !keys.space) && !climb.active) {
     vel.set(body.velocity.x, body.velocity.y, body.velocity.z);
     const tangential = vel.clone().addScaledVector(up, -vel.dot(up));
     const tangentialSpeed = tangential.length();
@@ -1894,7 +1904,8 @@ function updateThrusterAudio(dt, upVec) {
   if (!thruster || !thrusterLoaded || !thruster.isPlaying) return;
 
 
-  const targetVol = (keys.space || climb.active) ? THRUSTER_MAX_VOL : 0.0;
+  const thrusterActive = thrustLockTimer <= 0 && (keys.space || climb.active);
+  const targetVol = thrusterActive ? THRUSTER_MAX_VOL : 0.0;
 
 
   const a = 1 - Math.exp(-THRUSTER_FADE_HZ * dt);
@@ -1939,9 +1950,13 @@ function update() {
       previousPlanet = currentPlanet;
       currentPlanet = dom;
       planetTransitionT = 0.0;
+      thrustLockTimer = PLANET_THRUST_LOCK_DURATION;
     }
     if (planetTransitionT < 1.0) {
       planetTransitionT = Math.min(1.0, planetTransitionT + PLANET_TRANSITION_SPEED * dt);
+    }
+    if (thrustLockTimer > 0) {
+      thrustLockTimer = Math.max(0, thrustLockTimer - dt);
     }
 
 
@@ -2012,7 +2027,8 @@ function updateThrusterFX(dt ) {
   if (!thrusterFX || !thrusterFX.group) return;
 
 
-  let target = (keys.space || climb.active) ? 1.0 : 0.0;
+  const thrusterActive = thrustLockTimer <= 0 && (keys.space || climb.active);
+  let target = thrusterActive ? 1.0 : 0.0;
 
 
   if (typeof _thrusterVol === 'number') {
