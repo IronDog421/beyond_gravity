@@ -136,6 +136,7 @@ let minimapHUDAlt = null;
 let minimapHUDVel = null;
 let minimapHUDStatus = null;
 const minimapHUDLayoutCache = { ratio: -1, w: -1, h: -1, pad: -1, border: -1 };
+let stats = null;
 
 const MINIMAP = {
   w: 260,
@@ -312,7 +313,15 @@ function init() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.autoClear = false;
-  document.getElementById('container').appendChild(renderer.domElement);
+
+  const containerEl = document.getElementById('container');
+  if (containerEl) {
+    containerEl.appendChild(renderer.domElement);
+  } else {
+    document.body.appendChild(renderer.domElement);
+  }
+
+  initStats(containerEl || document.body);
 
   startOverlayEl = document.getElementById('startOverlay');
   startButtonEl = document.getElementById('startButton');
@@ -460,6 +469,29 @@ function initGameOverOverlay() {
   overlay.textContent = '';
   container.appendChild(overlay);
   gameOverOverlay = overlay;
+}
+
+function initStats(hostEl) {
+  if (stats || typeof Stats !== 'function') return;
+
+  stats = new Stats();
+  stats.showPanel(0);
+  const statsDom = stats.dom;
+  statsDom.id = 'fps-counter';
+  Object.assign(statsDom.style, {
+    position: 'fixed',
+    right: '18px',
+    bottom: '18px',
+    left: 'auto',
+    top: 'auto',
+    pointerEvents: 'none',
+    zIndex: '22'
+  });
+
+  const target = hostEl || document.body;
+  if (target && target.appendChild) {
+    target.appendChild(statsDom);
+  }
 }
 
 function initMinimapHUD() {
@@ -2062,6 +2094,7 @@ function updateThrusterFX(dt ) {
 
 function render() {
   requestAnimationFrame(render);
+  if (stats) stats.begin();
   update();
 
 
@@ -2072,6 +2105,7 @@ function render() {
 
 
   renderMinimapUp();
+  if (stats) stats.end();
 }
 
 let thrusterFX = null;
