@@ -1082,6 +1082,7 @@ function loadScene() {
   sunDirLight.shadow.camera.top = 6000;
   sunDirLight.shadow.camera.bottom = -6000;
   sunDirLight.shadow.bias = -0.0004;
+  sunDirLight.shadow.camera.updateProjectionMatrix();
   scene.add(sunDirLight);
   scene.add(sunDirLight.target);
 
@@ -1255,6 +1256,13 @@ function loadScene() {
     const hi = new THREE.Mesh(new THREE.SphereGeometry(radius, 192, 192), mat);
     const md = new THREE.Mesh(new THREE.SphereGeometry(radius, 96, 96), mat);
     const lo = new THREE.Mesh(new THREE.SphereGeometry(radius, 48, 48), mat);
+
+    if (!brightness) {
+      [hi, md, lo].forEach((mesh) => {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      });
+    }
 
     lod.addLevel(hi, 0);
     lod.addLevel(md, radius * 6);
